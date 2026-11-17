@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-17
+
+### Added
+
+- A **Settings → Config sync** section (`settings.section`, id `dsh-config-git-sync`) that reuses
+  the same status and pull/push card as the Plugins bundle page. The card remains available on the
+  plugin detail page as well.
+
+### Changed
+
+- Package version is now 0.4.0; the browser bundle registers both `settings.section` and
+  `plugins.bundle.config`. The suite stays at 155 tests.
+
 ## [0.3.0] - 2026-11-17
 
 ### Added

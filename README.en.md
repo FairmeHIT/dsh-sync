@@ -44,8 +44,9 @@ whole-machine migration including API keys, choose a tool dedicated to that job.
   committed bytes. Line-ending attributes and `.gitignore` cannot silently rewrite config.
 - **Conflict protection**: each machine records its last synced commit and file hashes. A push
   that would overwrite another machine's changes is refused unless explicitly forced.
-- **A page, not just commands**: see the remote, branch, last sync and diff on the plugin page,
-  then Pull or Push from there; it uses the same sync logic as the slash commands.
+- **A page, not just commands**: see the remote, branch, last sync and diff on the plugin page or
+  under **Settings → Config sync**, then Pull or Push from there; it uses the same sync logic as
+  the slash commands.
 - **Recoverable**: `pull apply` snapshots first and automatically rolls back managed files if a
   write or verification fails.
 - **Credential isolation**: `.credentials.yaml`, sessions, skills, memories, attachments and
@@ -171,10 +172,15 @@ login prompt and never stores a token.
 
 ## Usage
 
-### Plugin page
+### Plugin page and Settings
 
-After restarting DSH, open **Settings → Plugins**, open the `dsh-config-git-sync` bundle, and use the
-sync card at the top.
+After restarting DSH there are two entry points:
+
+- **Settings → Config sync**: the full status and action card, intended for everyday use.
+- Sidebar **Plugins** → the `dsh-config-git-sync` bundle page: the same card, reachable from the
+  plugin detail page.
+
+The card shows the remote, branch, profile and current status.
 
 - The card shows the remote, branch, profile and current status. **Refresh** is read-only.
 - **Preview pull** is the same as `/sync-pull`; it writes nothing.

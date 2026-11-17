@@ -78,16 +78,17 @@ describe('package manifest', () => {
 })
 
 describe('browser bundle', () => {
-  test('loads through the ModuleLoader and registers the bundle-page card', async () => {
+  test('loads through the ModuleLoader and registers both UI entries', async () => {
     const client = await readFile(join(root, 'client.js'), 'utf8')
     assert.ok(client.includes('window.__ModuleLoader__.load('))
     assert.ok(client.includes(`id: '${pkg.name}'`))
     assert.ok(client.includes('plugins.bundle.config'))
+    assert.ok(client.includes('settings.section'))
     assert.ok(client.includes('scope.slots.register('))
     assert.ok(client.includes('/api/config-sync/status'))
   })
 
-  test('registers the card and reads status through the host route', async () => {
+  test('registers the card and settings section, and reads status through the host route', async () => {
     const client = await readFile(join(root, 'client.js'), 'utf8')
     const calls = []
     const React = {
@@ -105,7 +106,8 @@ describe('browser bundle', () => {
       },
     }
     let exported
-    let registered
+    const registered = []
+    const injected = []
     const window = {
       confirm: () => true,
       __ModuleLoader__: {
@@ -139,11 +141,11 @@ describe('browser bundle', () => {
         callback({
           slots: {
             inject(name, factory) {
-              assert.equal(name, 'plugins.bundle.config')
+              injected.push(name)
               factory().next()
             },
             register(meta, component) {
-              registered = { meta, component }
+              registered.push({ meta, component })
               return () => {}
             },
           },
@@ -151,11 +153,17 @@ describe('browser bundle', () => {
       },
     })
 
-    assert.equal(registered.meta.name, 'plugins.bundle.config')
-    assert.equal(registered.meta.key, pkg.name)
-    assert.equal(registered.meta.order, 20)
-    registered.component()
+    assert.deepEqual(injected, ['plugins.bundle.config', 'settings.section'])
+    const bundle = registered.find((entry) => entry.meta.name === 'plugins.bundle.config')
+    const settings = registered.find((entry) => entry.meta.name === 'settings.section')
+    assert.equal(bundle.meta.key, pkg.name)
+    assert.equal(bundle.meta.order, 20)
+    assert.equal(settings.meta.id, pkg.name)
+    assert.equal(settings.meta.order, 20)
+    assert.equal(settings.meta.label, 'Config sync')
+    bundle.component()
     assert.equal(calls[0].path, '/api/config-sync/status')
+    assert.equal(settings.component().type, 'div')
   })
 })
 

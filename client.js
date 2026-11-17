@@ -390,6 +390,10 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function SettingsPage() {
+      return h('div', { style: { maxWidth: '760px' } }, h(Card))
+    }
+
     function apply(ctx) {
       if (typeof ctx?.inject !== 'function') return
       ctx.inject(['slots'], function (scope) {
@@ -398,6 +402,17 @@ window.__ModuleLoader__.load({
           yield scope.slots.register(
             { name: 'plugins.bundle.config', key: PACKAGE_NAME, order: 20 },
             Card,
+          )
+        })
+        scope.slots.inject('settings.section', function* () {
+          yield scope.slots.register(
+            {
+              name: 'settings.section',
+              id: PACKAGE_NAME,
+              order: 20,
+              label: copy.title,
+            },
+            SettingsPage,
           )
         })
       })

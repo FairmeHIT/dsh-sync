@@ -38,7 +38,7 @@ API 密钥和机器本地设置进入仓库的场景。如果你需要 settings/
   `.gitattributes` 无法悄悄改写配置。
 - **冲突保护**：每台机器记录上次同步的提交和文件哈希。会覆盖其他电脑改动的 push 默认被拒绝，
   必须显式 `--force`。
-- **可视化**：在 DSH 的插件页面查看远端、分支、上次同步和差异，直接点 Pull / Push；与斜杠命令
+- **可视化**：在 DSH 的插件页面或 **设置 → 配置同步** 查看远端、分支、上次同步和差异，直接点 Pull / Push；与斜杠命令
   走同一套同步逻辑。
 - **可恢复**：`pull apply` 前写快照；写入或校验失败时自动回滚本地受管文件。
 - **凭据隔离**：`.credentials.yaml`、session、skills、memories、附件和 `node_modules` 永远不在允许列表内。
@@ -157,9 +157,14 @@ dsh plugin --profile desktop add dsh-config-git-sync
 
 ## 使用
 
-### 插件页面
+### 插件页面与设置页
 
-重启 DSH 后，打开 **设置 → 插件**，进入 `dsh-config-git-sync` 的 bundle 页面，顶部会显示同步卡片。
+重启 DSH 后，有两个入口：
+
+- **设置 → 配置同步**：完整的状态与操作卡片，适合日常使用。
+- 侧边栏 **插件** → `dsh-config-git-sync` 的 bundle 页面：同一张卡片，方便从插件详情进入。
+
+卡片会显示远端、分支、profile 和当前状态。
 
 - 卡片显示远端、分支、profile 和当前状态；**刷新** 只读，不会写盘。
 - **预览 Pull** 等价于 `/sync-pull`，只显示差异。

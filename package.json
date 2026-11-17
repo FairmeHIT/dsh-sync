@@ -1,6 +1,6 @@
 {
   "name": "dsh-config-git-sync",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Git-backed sync for DeepSeek Harness profile plugin manifests and cordis.patch.yml.",
   "type": "module",
   "main": "index.js",
