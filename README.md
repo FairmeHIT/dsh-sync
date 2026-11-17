@@ -8,17 +8,11 @@
 > **仓库名与包名不同**：仓库是 [`FairmeHIT/dsh-sync`](https://github.com/FairmeHIT/dsh-sync)，npm 包名是
 > `dsh-config-git-sync`。npm 上的 `dsh-config-sync` 和 `dsh-sync` 已被其他项目占用，所以这里使用独立包名。
 
-## 为什么又做一个 sync 插件？
+## 设计范围与取舍
 
-DSH 生态里已经有 `dsh-sync` 和 `dsh-config-sync`。本项目不试图替代它们，而是解决一个更窄的问题：
-**在当前 DSH 0.2.2-rc.3 / 0.2.x 上，把任意 profile（包括 `desktop`）的插件清单和
-`cordis.patch.yml` 通过私有 Git 安全地同步。**
-
-- [`dsh-sync`](https://github.com/ZhenHuangLab/dsh-sync) 覆盖范围更大：settings 命名空间、home patch、
-  agent presets、Web 设置页和逐行冲突合并。截至 0.1.3，它的兼容基线是 DSH `0.1.0-rc.6`，profile 范围是
-  `web` / `headless`。
-- [`dsh-config-sync`](https://www.npmjs.com/package/dsh-config-sync) 是加密备份/换机迁移工具，
-  默认包含 API 凭据，不是持续 Git 同步。
+本项目只做一件事：**在当前 DSH 0.2.2-rc.3 / 0.2.x 上，把任意 profile（包括 `desktop`）的插件清单和
+`cordis.patch.yml` 通过私有 Git 同步。** 它刻意不覆盖 settings、凭据、agent presets 或整机备份；
+这些内容有各自的工具和风险边界，混在一起会让同步面过大。
 
 我们的取舍：
 
@@ -33,11 +27,9 @@ DSH 生态里已经有 `dsh-sync` 和 `dsh-config-sync`。本项目不试图替�
 | host-only，不带 Web UI | 命令/工具在 desktop/headless 都能用，依赖面更小 |
 | state + 跨进程锁 + 快照 | 多机器/多会话并发时避免静默覆盖和半写 |
 
-如果你需要 settings + presets + Web 逐行合并，`dsh-sync` 更合适；如果你需要包含 API key 的加密整机
-迁移，`dsh-config-sync` 更合适。本项目只把“profile 插件清单的 Git 同步”做窄、做稳。
-
-> 本项目与上述两个包没有隶属关系。GitHub 仓库名 `dsh-sync` 与 `ZhenHuangLab/dsh-sync` 同名，
-> 但 npm 包名是 `dsh-config-git-sync`。
+这不是一个“大而全”的 DSH 配置备份工具。它适合希望把插件清单和配置覆盖层纳入 Git 审计、又不想让
+API 密钥和机器本地设置进入仓库的场景。如果你需要 settings/presets 的图形化逐行合并，或包含 API key
+的加密整机迁移，请选择专门做这些的工具。
 
 ## 特性
 

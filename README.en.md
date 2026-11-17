@@ -11,17 +11,12 @@ English | [中文](README.md)
 > `dsh-config-git-sync`. The npm names `dsh-config-sync` and `dsh-sync` are already used by
 > unrelated projects, so this package uses its own name.
 
-## Why another sync plugin?
+## Scope and design
 
-The DSH ecosystem already has `dsh-sync` and `dsh-config-sync`. This project does not try to replace
-them; it solves a narrower problem: **sync the plugin manifest and `cordis.patch.yml` of any profile
-(desktop included) through a private Git repository on current DSH 0.2.2-rc.3 / 0.2.x.**
-
-- [`dsh-sync`](https://github.com/ZhenHuangLab/dsh-sync) covers a wider surface: settings namespaces,
-  home patches, agent presets, a Web settings page and per-line conflict merge. As of 0.1.3 its
-  compatibility baseline is DSH `0.1.0-rc.6`, and its profile scope is `web` / `headless`.
-- [`dsh-config-sync`](https://www.npmjs.com/package/dsh-config-sync) is an encrypted backup/migration
-  tool that includes API credentials by default; it is not continuous Git sync.
+This project does one thing: **sync the plugin manifest and `cordis.patch.yml` of any profile
+(desktop included) through a private Git repository on current DSH 0.2.2-rc.3 / 0.2.x.** It
+deliberately does not cover settings, credentials, agent presets or whole-machine backup; those
+have their own tools and risk boundaries, and mixing them in would make the sync surface too broad.
 
 Our trade-offs:
 
@@ -36,12 +31,10 @@ Our trade-offs:
 | Host-only, no Web UI | Commands/tools work in desktop and headless, with a smaller dependency surface |
 | State + cross-process lock + snapshots | Avoid silent overwrites and half-written files across machines/sessions |
 
-If you need settings + presets + Web line-level merge, `dsh-sync` is the better fit. If you need
-encrypted whole-machine migration including API keys, `dsh-config-sync` is the better fit. This project
-keeps profile plugin-manifest Git sync narrow and predictable.
-
-> This project is not affiliated with either package. The GitHub repository is named `dsh-sync`, the
-> same as `ZhenHuangLab/dsh-sync`, but the npm package is `dsh-config-git-sync`.
+This is not an all-in-one DSH configuration backup tool. It fits workflows that want the plugin
+manifest and config overlay under Git review without putting API keys or machine-local settings in
+the repository. If you need graphical line-level merge for settings/presets, or encrypted
+whole-machine migration including API keys, choose a tool dedicated to that job.
 
 ## Highlights
 
