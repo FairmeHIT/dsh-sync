@@ -86,6 +86,8 @@ describe('browser bundle', () => {
     assert.ok(client.includes('settings.section'))
     assert.ok(client.includes('scope.slots.register('))
     assert.ok(client.includes('/api/config-sync/status'))
+    assert.ok(client.includes('pushBusy'))
+    assert.ok(client.includes("role: 'status'"))
   })
 
   test('registers the card and settings section, and reads status through the host route', async () => {

@@ -30,6 +30,13 @@ window.__ModuleLoader__.load({
           preview: '预览 Pull',
           apply: '应用 Pull',
           push: 'Push',
+          syncBusy: '同步中…',
+          pullBusy: 'Pull 中…',
+          pushBusy: 'Push 中…',
+          pushDone: 'Push 完成：远端已更新。',
+          pullDone: 'Pull 完成。',
+          previewDone: '预览完成。',
+          upToDate: '已是最新，没有需要同步的改动。',
           message: '提交信息（可选）',
           messageHint: '留空则自动生成',
           status: '状态',
@@ -50,6 +57,13 @@ window.__ModuleLoader__.load({
           preview: 'Preview pull',
           apply: 'Apply pull',
           push: 'Push',
+          syncBusy: 'Syncing…',
+          pullBusy: 'Pulling…',
+          pushBusy: 'Pushing…',
+          pushDone: 'Push complete: the remote is updated.',
+          pullDone: 'Pull complete.',
+          previewDone: 'Preview complete.',
+          upToDate: 'Already up to date; nothing to sync.',
           message: 'Commit message (optional)',
           messageHint: 'Leave blank to auto-generate',
           status: 'Status',
@@ -131,8 +145,10 @@ window.__ModuleLoader__.load({
       var state = React.useState({
         loading: true,
         busy: false,
+        busyAction: '',
         data: null,
         error: null,
+        notice: '',
         result: '',
         message: '',
       })
@@ -146,6 +162,7 @@ window.__ModuleLoader__.load({
             loading: true,
             error: null,
             result: preserveResult ? current.result : '',
+            notice: preserveResult ? current.notice : '',
           }
         })
         try {
@@ -167,10 +184,10 @@ window.__ModuleLoader__.load({
         [load],
       )
 
-      async function run(path, body, confirmText) {
+      async function run(path, body, confirmText, action) {
         if (confirmText && !window.confirm(confirmText)) return
         setView(function (current) {
-          return { ...current, busy: true, error: null }
+          return { ...current, busy: true, busyAction: action, error: null, notice: '', result: '' }
         })
         try {
           var data = await request(path, {
@@ -178,13 +195,21 @@ window.__ModuleLoader__.load({
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body),
           })
+          var text = data.text || ''
+          var notice = /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
+            ? copy.upToDate
+            : action === 'push'
+              ? copy.pushDone
+              : action === 'apply'
+                ? copy.applied
+                : copy.previewDone
           setView(function (current) {
-            return { ...current, busy: false, result: data.text || '' }
+            return { ...current, busy: false, busyAction: '', result: text, notice: notice }
           })
           await load(true)
         } catch (error) {
           setView(function (current) {
-            return { ...current, busy: false, error: error }
+            return { ...current, busy: false, busyAction: '', error: error, notice: '' }
           })
         }
       }
@@ -239,7 +264,7 @@ window.__ModuleLoader__.load({
                 whiteSpace: 'nowrap',
               },
             },
-            view.loading ? '…' : copy.status,
+            view.loading ? '…' : view.busy ? copy.syncBusy : copy.status,
           ),
         ),
         h(
@@ -293,11 +318,11 @@ window.__ModuleLoader__.load({
               type: 'button',
               disabled: disabled,
               onClick: function () {
-                run(ROUTES.pull, { apply: false })
+                run(ROUTES.pull, { apply: false }, null, 'preview')
               },
               style: buttonStyle(false),
             },
-            copy.preview,
+            view.busyAction === 'preview' ? copy.pullBusy : copy.preview,
           ),
           h(
             'button',
@@ -305,11 +330,11 @@ window.__ModuleLoader__.load({
               type: 'button',
               disabled: disabled,
               onClick: function () {
-                run(ROUTES.pull, { apply: true }, copy.applyConfirm)
+                run(ROUTES.pull, { apply: true }, copy.applyConfirm, 'apply')
               },
               style: buttonStyle(false),
             },
-            copy.apply,
+            view.busyAction === 'apply' ? copy.pullBusy : copy.apply,
           ),
           h(
             'button',
@@ -317,11 +342,11 @@ window.__ModuleLoader__.load({
               type: 'button',
               disabled: disabled,
               onClick: function () {
-                run(ROUTES.push, { message: view.message })
+                run(ROUTES.push, { message: view.message }, null, 'push')
               },
               style: buttonStyle(true),
             },
-            copy.push,
+            view.busyAction === 'push' ? copy.pushBusy : copy.push,
           ),
           h(
             'input',
@@ -353,6 +378,24 @@ window.__ModuleLoader__.load({
             },
           ),
         ),
+        view.notice
+          ? h(
+              'div',
+              {
+                role: 'status',
+                style: {
+                  border: '1px solid var(--dsw-alias-border-success, rgba(40,160,90,.45))',
+                  borderRadius: '8px',
+                  background: 'rgba(40,160,90,.08)',
+                  padding: '8px 10px',
+                  fontSize: '13px',
+                  lineHeight: 1.5,
+                  fontWeight: 600,
+                },
+              },
+              view.notice,
+            )
+          : null,
         h(
           'div',
           null,

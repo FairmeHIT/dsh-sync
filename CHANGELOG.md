@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-11-18
+
+### Fixed
+
+- Push, preview pull and apply pull now show an immediate success notice, and the clicked button
+  reads `Push 中…` / `Pull 中…` while the request is running. Previously a successful push updated
+  the remote and the status text but looked like nothing had happened.
+
 ## [0.4.1] - 2026-11-17
 
 ### Changed
