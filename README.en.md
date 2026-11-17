@@ -406,6 +406,10 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 | `E_REMOTE_EMPTY` | The remote has no manifest for this profile yet; push from a configured machine first |
 | `E_APPLY` | A pull write or verification failed; managed files were rolled back, so check disk space and permissions, then retry |
 | `E_GIT` / `E_CANCELLED` | Git failed or the operation was cancelled; check the Git installation, network, authentication and logs |
+| `E_CONFIG_INPUT` | The remote/branch/profile typed in the plugin page is invalid; use a credential-free HTTPS/SSH URL or a server-trusted local path |
+| `E_CONFIG_BUSY` / `E_CONFIG_SAVE` | A configuration save is already in progress or failed; wait for the plugin to reload and retry, and check higher-priority overrides |
+| `E_CONFIG_TIMEOUT` / `E_TIMEOUT` | A plugin-page request timed out (save 15s / read 90s / sync 10min); retry on a slow network |
+| `E_HTTP` | A plugin-page request failed (route unresponsive or non-JSON response); refresh the page, restart DSH if needed |
 | Git authentication failure | Set up an SSH key or cache HTTPS credentials; the plugin never prompts |
 | Nothing changed after a pull | Restart DSH; `cordis.patch.yml` is composed at boot |
 

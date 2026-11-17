@@ -12,6 +12,9 @@ jobs:
   test:
     name: Node ${{ matrix.node }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # Give the runner itself a hard stop: a stalled macOS runner otherwise
+    # burns the default 360-minute budget before the matrix reports failure.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

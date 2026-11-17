@@ -357,6 +357,10 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 | `E_REMOTE_EMPTY` | 远端还没有本 profile 的 manifest；先在有配置的机器上 push |
 | `E_APPLY` | pull 写入或校验失败；本地受管文件已回滚，检查磁盘空间/权限后重试 |
 | `E_GIT` / `E_CANCELLED` | Git 执行失败或被取消；检查 Git 安装、网络、认证和日志 |
+| `E_CONFIG_INPUT` | 插件页面里填写的 remote/branch/profile 不合法；改为不含凭据的 HTTPS/SSH 地址或服务器可信的本地路径 |
+| `E_CONFIG_BUSY` / `E_CONFIG_SAVE` | 配置保存正在进行或写入失败；稍等插件重载后重试，检查高优先级覆盖 |
+| `E_CONFIG_TIMEOUT` / `E_TIMEOUT` | 插件页面请求超时（保存 15s / 读取 90s / 同步 10min）；网络慢时重试 |
+| `E_HTTP` | 插件页面请求失败（路由未响应或返回非 JSON）；刷新页面，必要时重启 DSH |
 | Git 认证失败 | 配置 SSH key 或预先缓存 HTTPS 凭据；插件不会弹出登录框 |
 | pull 后插件没变化 | 重启 DSH；`cordis.patch.yml` 只在启动时组合 |
 

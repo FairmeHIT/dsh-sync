@@ -183,6 +183,7 @@ describe('parseApplyInput', () => {
     assert.equal(parseApplyInput(''), false)
     assert.equal(parseApplyInput(undefined), false)
     assert.equal(parseApplyInput('applynow'), false)
+    assert.equal(parseApplyInput('apply-ish'), false)
     assert.equal(parseApplyInput('dry-run'), false)
   })
 })

@@ -51,6 +51,7 @@ window.__ModuleLoader__.load({
           configWarning: '配置保存在 profile patch 中，Pull 可能覆盖这些设置。仅填写不含凭据的 HTTPS / SSH 地址，使用 Git 凭据管理器或 SSH；本地路径指服务器上当前信任用户可访问的路径。',
           applyConfirm: 'Pull 会覆盖本机受管文件。应用前会自动写快照。继续？',
           applied: '已应用远端配置。建议重启 DSH。',
+          requestTimeout: '请求超时，请稍后重试。',
           error: '操作失败',
         }
       : {
@@ -84,11 +85,36 @@ window.__ModuleLoader__.load({
           applyConfirm:
             'Pull will overwrite managed files on this machine. A snapshot is written first. Continue?',
           applied: 'Remote configuration applied. Restart DSH when convenient.',
+          requestTimeout: 'The request timed out. Please retry.',
           error: 'Request failed',
         }
 
     async function request(path, options) {
-      var response = await fetch(path, options)
+      // Every card request carries a deadline so a stalled fetch can never
+      // freeze the card in a busy/loading state. Sync operations can take
+      // minutes on slow remotes; reads still finish quickly.
+      var controller = new AbortController()
+      var timeoutMs = options && options.timeoutMs
+      var timer = setTimeout(function () { controller.abort() }, timeoutMs || 90000)
+      var optionsWithSignal = { ...(options || {}), signal: controller.signal }
+      delete optionsWithSignal.timeoutMs
+      var response
+      try {
+        response = await fetch(path, optionsWithSignal)
+      } catch (error) {
+        clearTimeout(timer)
+        // Only a deadline abort becomes a timeout error. Other transport
+        // failures must propagate unchanged: saveConfig tolerates code-less
+        // transport loss while the plugin reconciles, and callers display
+        // the original message.
+        if (error && (error.name === 'AbortError' || controller.signal.aborted)) {
+          var failure = new Error(copy.requestTimeout)
+          failure.code = 'E_TIMEOUT'
+          throw failure
+        }
+        throw error
+      }
+      clearTimeout(timer)
       var data
       try {
         data = await response.json()
@@ -240,9 +266,13 @@ window.__ModuleLoader__.load({
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body),
+            // Push/pull can take minutes on slow remotes or large profiles.
+            timeoutMs: 600000,
           })
           var text = data.text || ''
-          var notice = /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
+          // The server reports the no-change outcome as a structured field;
+          // the regex is only a fallback for older plugin instances.
+          var notice = data.upToDate === true || /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
             ? copy.upToDate
             : action === 'push'
               ? copy.pushDone
@@ -273,7 +303,9 @@ window.__ModuleLoader__.load({
             if (error.code) throw error
           }
           var verified = null
-          for (var attempt = 0; attempt < 12; attempt++) {
+          // Give a slow plugin reload time to surface the saved values: poll
+          // for up to ~40 attempts x 500ms (~20s) instead of giving up at 6s.
+          for (var attempt = 0; attempt < 40; attempt++) {
             if (attempt) await new Promise(function (resolve) { setTimeout(resolve, 500) })
             try {
               var effective = await configRequest()
@@ -286,13 +318,20 @@ window.__ModuleLoader__.load({
           if (!verified) throw new Error(copy.saveError)
           setView(function (current) { return { ...current, saving: false, remoteHidden: false, notice: copy.saved, data: { ...current.data, ...verified } } })
           await load(true)
-        } catch {
-          setView(function (current) { return { ...current, saving: false, configError: copy.saveError, notice: '' } })
+        } catch (error) {
+          // Surface the server's own rejection code/message (E_CONFIG_INPUT,
+          // E_CONFIG_BUSY, …) instead of a generic string that hides the cause.
+          setView(function (current) {
+            return { ...current, saving: false, configError: (error && (error.code || error.message)) ? (error.code ? error.code + ' — ' : '') + error.message : copy.saveError, notice: '' }
+          })
         }
       }
 
       var data = view.data || {}
       var disabled = view.busy || view.loading || view.saving
+      // A stalled fetch must never lock the user out of Refresh: only a sync
+      // action or config save disables it, so a hung status read can be retried.
+      var refreshDisabled = view.busy || view.saving
       var statusText = view.result || data.text || ''
       var error = view.error
       var hint =
@@ -404,7 +443,7 @@ window.__ModuleLoader__.load({
             'button',
             {
               type: 'button',
-              disabled: disabled,
+              disabled: refreshDisabled,
               onClick: function () {
                 load(false)
               },

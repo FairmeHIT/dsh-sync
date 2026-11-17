@@ -25,6 +25,20 @@ async function call(routes, path, { method = 'GET', body } = {}) {
   return { response, body: await response.json() }
 }
 
+test('status, push and pull report the up-to-date outcome as a structured field', async () => {
+  const routes = createHttpRoutes(config, {
+    status: async () => ['Config sync status', '', 'Already up to date.'].join('\n'),
+    push: async () => ['Config sync push', '', 'Already up to date; nothing to commit.'].join('\n'),
+    pull: async () => 'Pulled 2 files',
+  })
+  const status = await call(routes, '/api/config-sync/status')
+  assert.equal(status.body.upToDate, true)
+  const push = await call(routes, '/api/config-sync/push', { method: 'POST', body: {} })
+  assert.equal(push.body.upToDate, true)
+  const pull = await call(routes, '/api/config-sync/pull', { method: 'POST', body: {} })
+  assert.equal(pull.body.upToDate, false)
+})
+
 test('configuration GET works without remote and never calls Git', async () => {
   const routes = createHttpRoutes({ remote: '', branch: 'main' }, {})
   const { body } = await call(routes, '/api/config-sync/config')

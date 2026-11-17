@@ -59,7 +59,7 @@ export async function withLock(dshHome, run, options = {}) {
       if (Date.now() - started > WAIT_MS) {
         throw new SyncError(
           'E_BUSY',
-          `another config sync is running (lock: ${file}); wait for it to finish or remove the file if it is stale`,
+          `another config sync is running (lock: ${file}); wait for it to finish, or remove the file if you are sure no other sync is active (a live PID can rarely be a reused process id)`,
         )
       }
       await delay(POLL_MS)

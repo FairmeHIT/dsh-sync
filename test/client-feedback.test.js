@@ -16,6 +16,7 @@ function setup({ language = 'en', confirm = true, configFailure = false, config 
   let current, initial = true, effect, Card, exported
   const calls = [], queue = [], configCalls = [], configQueue = []
   const timers = new Map(); let timerId = 0
+  const deadlines = []
   const React = {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
     useState(value) {
@@ -36,11 +37,15 @@ function setup({ language = 'en', confirm = true, configFailure = false, config 
       return Promise.resolve(next)
     }
     calls.push({ path, options })
+    // 'hang' entries stall until the request signal aborts, so deadline
+    // behavior (status 90s, push/pull 10min) can be tested synchronously.
+    if (queue[0] === 'hang') return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
     assert.ok(queue.length, `unexpected request: ${path}`)
     return Promise.resolve(queue.shift())
   }
   new Function('window', 'navigator', 'fetch', 'setTimeout', 'clearTimeout', source)(window, { language }, fetch, (resolve, ms) => {
     if (ms === 500) { resolve(); return 0 }
+    deadlines.push(ms)
     timers.set(++timerId, resolve); return timerId
   }, (id) => timers.delete(id))
   exported.apply({ inject(_services, cb) { cb({ slots: {
@@ -55,7 +60,7 @@ function setup({ language = 'en', confirm = true, configFailure = false, config 
   const notice = () => { const node = find((n) => n.props.role === 'status'); return node && text(node) }
   const pre = () => text(find((n) => n.type === 'pre'))
   queue.push(response(status)); render(); effect()
-  return { calls, queue, configCalls, configQueue, render, find, text, button, notice, pre, expire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((fn) => fn()) } }
+  return { calls, queue, configCalls, configQueue, render, find, text, button, notice, pre, deadlines, expire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((fn) => fn()) } }
 }
 
 test('failed initial config load cannot save unknown defaults and explicit retry restores form', async () => {
@@ -147,11 +152,57 @@ test('accepted save retries mismatched effective values and never calls it succe
   ui.find((n) => n.props['aria-label'] === 'Remote').props.onChange({ target: { value: '/srv/changed.git' } })
   ui.configQueue.push(response({ ok: true, accepted: true, verified: false }))
   ui.button('Save configuration').props.onClick()
-  for (let i = 0; i < 10; i++) await tick()
-  assert.equal(ui.configCalls.length, 14)
+  for (let i = 0; i < 40; i++) await tick()
+  assert.equal(ui.configCalls.length, 42)
   assert.equal(ui.notice(), undefined)
   assert.ok(ui.find((n) => n.props.role === 'alert'))
   assert.equal(ui.button('Save configuration').props.disabled, false)
+})
+
+test('a hung status read times out with E_TIMEOUT and leaves Refresh retryable', async () => {
+  const ui = setup(); await tick()
+  ui.queue.push('hang')
+  ui.button('Refresh').props.onClick()
+  // Other actions are disabled while the read is in flight...
+  assert.equal(ui.button('Preview pull').props.disabled, true)
+  ui.expire(); await tick(); await tick()
+  // ...after the deadline, the timeout is reported in the error box and every control recovers.
+  const errorBox = ui.find((n) => n.type === 'strong' && /Request failed/i.test(ui.text(n)))
+  assert.ok(errorBox, 'the error box is rendered')
+  assert.match(ui.text(ui.find((n) => n.type === 'div' && ui.text(n).includes('E_TIMEOUT'))), /E_TIMEOUT/)
+  assert.equal(ui.button('Refresh').props.disabled, false)
+})
+
+test('a hung push times out with E_TIMEOUT and the card recovers', async () => {
+  const ui = setup(); await tick()
+  ui.queue.push('hang')
+  ui.button('Push').props.onClick()
+  assert.equal(ui.button('Pushing…').props.disabled, true)
+  ui.expire(); await tick(); await tick()
+  const errorBox = ui.find((n) => n.type === 'strong' && /Request failed/i.test(ui.text(n)))
+  assert.ok(errorBox, 'the error box is rendered')
+  assert.match(ui.text(ui.find((n) => n.type === 'div' && ui.text(n).includes('E_TIMEOUT'))), /E_TIMEOUT/)
+  assert.equal(ui.button('Push').props.disabled, false)
+  // The push request carried the 10-minute deadline. request() strips
+  // timeoutMs before fetch; the timer mock captured the deadline directly.
+  const pushCall = ui.calls.find((c) => c.path === '/api/config-sync/push')
+  assert.ok(pushCall, 'a push request was made')
+  assert.ok(pushCall.options.signal, 'the push request is abortable')
+  assert.ok(ui.deadlines.includes(600000), 'push used the 10-minute deadline')
+})
+
+test('push uses the structured upToDate field, with the text regex as fallback', async () => {
+  // New servers report the outcome as a field; the notice must not depend
+  // on the report wording at all.
+  const ui = setup(); await tick()
+  ui.queue.push(response({ ok: true, text: 'Pushed 2 files', upToDate: true }), response(status))
+  ui.button('Push').props.onClick(); await tick(); await tick()
+  assert.equal(ui.notice(), 'Already up to date; nothing to sync.')
+  // Older instances still report up-to-date in text only.
+  const legacy = setup(); await tick()
+  legacy.queue.push(response({ ok: true, text: 'Already up to date; nothing to commit.' }), response(status))
+  legacy.button('Push').props.onClick(); await tick(); await tick()
+  assert.equal(legacy.notice(), 'Already up to date; nothing to sync.')
 })
 
 test('push shows busy state, passes message, preserves success through refresh, then manual refresh clears it', async () => {

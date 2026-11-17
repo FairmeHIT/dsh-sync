@@ -82,6 +82,21 @@ function optionalMessage(body) {
  * Build Fetch routes for the Plugins-page card. Operations are injected so the
  * HTTP layer stays testable without a Git remote.
  */
+/**
+ * Detect the "nothing changed" outcome without relying on the human-facing
+ * report text: the sync module uses these exact trailing lines.
+ */
+const UP_TO_DATE_LINES = new Set([
+  'Already up to date.',
+  'Already up to date; nothing to commit.',
+])
+
+function upToDate(text) {
+  return String(text || '')
+    .split('\n')
+    .some((line) => UP_TO_DATE_LINES.has(line.trim()))
+}
+
 export function createHttpRoutes(config, operations, editor) {
   async function configRoute(request) {
     if (request.method === 'GET') return json({ ok: true, ...publicConfig(config) })
@@ -100,7 +115,7 @@ export function createHttpRoutes(config, operations, editor) {
   async function statusRoute() {
     try {
       const text = await operations.status(config)
-      return json({ ok: true, ...identity(config), text })
+      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text) })
     } catch (error) {
       return failure(config, error)
     }
@@ -113,7 +128,7 @@ export function createHttpRoutes(config, operations, editor) {
       const message = optionalMessage(body)
       const force = optionalBoolean(body, 'force')
       const text = await operations.push(config, { message, force })
-      return json({ ok: true, ...identity(config), text })
+      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text) })
     } catch (error) {
       return failure(config, error, error instanceof BadRequest ? 400 : 200)
     }
@@ -125,7 +140,7 @@ export function createHttpRoutes(config, operations, editor) {
       body = await readBody(request)
       const apply = optionalBoolean(body, 'apply')
       const text = await operations.pull(config, { apply })
-      return json({ ok: true, ...identity(config), text })
+      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text) })
     } catch (error) {
       return failure(config, error, error instanceof BadRequest ? 400 : 200)
     }

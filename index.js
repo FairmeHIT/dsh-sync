@@ -40,11 +40,12 @@ function withEffect(ctx, label, register) {
 
 /**
  * The command runtime passes the text after the command name verbatim,
- * including the separating space. Accept "apply" in any case, optionally
- * followed by more words.
+ * including the separating space. Treat "apply" as a whole word only — a
+ * hyphenated or glued form (e.g. "apply-ish", "applynow") must not trigger
+ * the destructive path.
  */
 export function parseApplyInput(rawInput) {
-  return /^apply\b/i.test(String(rawInput ?? '').trim())
+  return /^apply(?:\s|$)/i.test(String(rawInput ?? '').trim())
 }
 
 /** Parse `/sync-push [--force] [message]`; only leading flags are commands. */

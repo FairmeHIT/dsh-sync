@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-11-18
+
+### Fixed
+
+- Robustness pass after a full external audit. The plugin page now times out every request
+  (status 90 s, push/pull 10 min, configuration 15 s) and always re-enables its controls, so a
+  stalled fetch can no longer freeze the card; a hung status read can be retried with Refresh.
+- Configuration save failures now surface the server's error code and message
+  (`E_CONFIG_INPUT`, `E_CONFIG_BUSY`, …) instead of a generic message, and the effective-value
+  verification window grew from ~6 s to ~20 s for slow plugin reloads.
+- `git` subprocesses ignore stdin EPIPE instead of potentially crashing the host; Git timeouts now
+  report `git <command> timed out after Ns` instead of `unknown git failure`; Windows
+  "access is denied" filesystem errors are no longer misclassified as authentication failures.
+- Local paths containing `@` (for example `/srv/config@v2.git`) can be saved in the plugin page;
+  the `@` restriction now applies only to scp-like remotes.
+- The card uses a structured `upToDate` field from the routes instead of regex-matching the report
+  text (kept as a fallback for older instances), and `/sync-pull` only treats the whole word
+  "apply" as the destructive flag, so "apply-ish" no longer triggers an apply.
+- CI jobs carry a 15-minute timeout so a stalled runner fails fast instead of burning the hour.
+
 ## [0.5.0] - 2026-11-18
 
 ### Added

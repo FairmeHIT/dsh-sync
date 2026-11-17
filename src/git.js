@@ -46,7 +46,7 @@ export function classifyPushFailure(text) {
     return 'E_PUSH_REJECTED'
   }
   if (
-    /authentication failed|could not read (?:username|password)|permission denied|access denied|repository not found|does not appear to be a git repository|terminal prompts disabled|access is denied/i.test(
+    /authentication failed|could not read (?:username|password)|permission denied|access denied|repository not found|does not appear to be a git repository|terminal prompts disabled/i.test(
       detail,
     )
   ) {
@@ -58,6 +58,9 @@ export function classifyPushFailure(text) {
 function gitError(config, args, result) {
   if (result.spawnCode === 'ENOENT') {
     return new SyncError('E_GIT', `git executable not found: ${config.gitBin}`)
+  }
+  if (result.timedOut) {
+    return new SyncError('E_GIT', `git ${args[0]} timed out after ${Math.round(result.timeoutMs / 1000)}s`)
   }
   const detail = redactRemote(result.stderr || result.stdout || 'unknown git failure', config.remote)
   return new SyncError('E_GIT', `git ${args[0]} failed: ${detail}`)
@@ -90,6 +93,8 @@ function run(config, args, options = {}) {
         const result = {
           code: typeof error?.code === 'number' ? error.code : error ? 1 : 0,
           spawnCode: typeof error?.code === 'string' ? error.code : null,
+          timedOut: Boolean(error?.killed || (error?.signal === 'SIGTERM')),
+          timeoutMs: options.timeout ?? 120_000,
           stdout:
             options.encoding === null
               ? stdoutBuffer
@@ -109,6 +114,9 @@ function run(config, args, options = {}) {
         resolve(result)
       },
     )
+    // EPIPE can fire when git exits before reading all stdin (e.g. an error path);
+    // ignore it — the exit callback still reports the real failure.
+    if (child.stdin) child.stdin.on('error', () => {})
     if (options.input !== undefined && child.stdin) child.stdin.end(options.input)
   })
 }

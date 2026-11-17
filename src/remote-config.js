@@ -23,8 +23,13 @@ export function validateRemoteFields(input) {
     if (url.protocol === 'https:' && url.username) invalid()
     if (url.protocol === 'ssh:' && url.username && url.username !== 'git') invalid()
   } else if (remote && !/^[A-Za-z]:[\\/]/.test(remote) && /^[^/\\]+:/.test(remote)) {
+    // scp-like syntax: only the strict git@host:path form is accepted, so any
+    // other username (e.g. a credential-bearing user) is rejected here.
     if (!/^git@[A-Za-z0-9.-]+:(?!-)[A-Za-z0-9_./~-]+$/.test(remote) || remote.includes('::')) invalid()
-  } else if (remote.includes('@')) invalid()
+  }
+  // A plain local path may legitimately contain '@' (e.g. /srv/config@v2.git);
+  // scp-like and URL forms were already validated strictly above, so no
+  // blanket '@' rejection is needed here.
   if (!/^[A-Za-z0-9][A-Za-z0-9_./-]*$/.test(branch) || branch.includes('..') || branch.includes('//') || branch.endsWith('.') || branch.endsWith('/') || branch.split('/').some((part) => part.startsWith('.') || part.endsWith('.lock'))) invalid()
   if (profile && (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(profile) || profile.includes('..'))) invalid()
   return { remote, branch, profile }
