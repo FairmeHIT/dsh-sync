@@ -202,11 +202,13 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 1. 执行 dsh plugin --profile desktop add github:FairmeHIT/dsh-sync。
 2. 如果 ~/.dsh/cordis.patch.yml 不存在就创建；如果已存在，只把下面这段追加到数组末尾，不要覆盖：
 - id: config-sync
+  name: dsh-config-git-sync
   config:
     remote: 'git@github.com:YOURNAME/dsh-config.git'
     branch: main
     profile: desktop
-3. 不要写到 profile 的 cordis.patch.yml；完成后提醒我重启 DSH，不要尝试重启或结束当前进程。
+3. 写入后读回 ~/.dsh/cordis.patch.yml，确认 remote 在 config: 下面（缩进 4 个空格），而不是直接写在 id 下面；如果文件无法写入，把完整 YAML 贴给我手动处理，不要只回复完成。
+4. 不要写到 profile 的 cordis.patch.yml；完成后提醒我重启 DSH，不要尝试重启或结束当前进程。
 ```
 
 **第二段（重启后）**
@@ -316,6 +318,21 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 | `E_GIT` / `E_CANCELLED` | Git 执行失败或被取消；检查 Git 安装、网络、认证和日志 |
 | Git 认证失败 | 配置 SSH key 或预先缓存 HTTPS 凭据；插件不会弹出登录框 |
 | pull 后插件没变化 | 重启 DSH；`cordis.patch.yml` 只在启动时组合 |
+
+`E_CONFIG` 表示插件已经加载，只是配置里没有 `remote`；插件没装时 `config_sync_status` 工具根本不会出现。
+检查 `~/.dsh/cordis.patch.yml` 是否是顶层数组，且 `remote` 在 `config:` 下面：
+
+```yaml
+- id: config-sync
+  name: dsh-config-git-sync
+  config:
+    remote: 'git@github.com:YOURNAME/dsh-config.git'
+    branch: main
+    profile: desktop
+```
+
+如果 `remote` 和 `id` 对齐，或配置写进了 profile 的 `cordis.patch.yml`，都会读不到；后者还会被 pull 覆盖。
+改完彻底退出并重启 DSH。
 
 ## 开发
 

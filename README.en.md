@@ -217,11 +217,13 @@ Install and configure DSH sync on this machine:
 1. Run dsh plugin --profile desktop add github:FairmeHIT/dsh-sync.
 2. Create ~/.dsh/cordis.patch.yml if it does not exist. If it exists, append the block below to the end of the array; do not overwrite existing content:
 - id: config-sync
+  name: dsh-config-git-sync
   config:
     remote: 'git@github.com:YOURNAME/dsh-config.git'
     branch: main
     profile: desktop
-3. Do not write this to the profile's cordis.patch.yml. When done, tell me to restart DSH; do not try to restart or terminate the current process.
+3. Read ~/.dsh/cordis.patch.yml back and confirm remote is nested under config: (four-space indent), not directly under id. If the file cannot be written, paste the complete YAML back to me for a manual fix; do not just reply that it is done.
+4. Do not write this to the profile's cordis.patch.yml. When done, tell me to restart DSH; do not try to restart or terminate the current process.
 ```
 
 **Prompt 2 (after restart)**
@@ -359,6 +361,22 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 | `E_GIT` / `E_CANCELLED` | Git failed or the operation was cancelled; check the Git installation, network, authentication and logs |
 | Git authentication failure | Set up an SSH key or cache HTTPS credentials; the plugin never prompts |
 | Nothing changed after a pull | Restart DSH; `cordis.patch.yml` is composed at boot |
+
+`E_CONFIG` means the plugin is loaded but its config has no `remote`; if the plugin were missing,
+`config_sync_status` would not exist. Check that `~/.dsh/cordis.patch.yml` is a top-level array and
+`remote` is nested under `config:`:
+
+```yaml
+- id: config-sync
+  name: dsh-config-git-sync
+  config:
+    remote: 'git@github.com:YOURNAME/dsh-config.git'
+    branch: main
+    profile: desktop
+```
+
+If `remote` is aligned with `id`, or the block was written into the profile `cordis.patch.yml`, it is
+not read; the latter is also overwritten by a pull. Fully quit and restart DSH.
 
 ## Development
 
