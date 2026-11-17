@@ -1,0 +1,75 @@
+{
+  "name": "dsh-config-git-sync",
+  "version": "0.2.0",
+  "description": "Git-backed sync for DeepSeek Harness profile plugin manifests and cordis.patch.yml.",
+  "type": "module",
+  "main": "index.js",
+  "icon": "icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale",
+    "docs",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:e2e": "node --test test/git-e2e.test.js",
+    "pack:check": "npm pack --dry-run",
+    "prepublishOnly": "npm test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "config-sync",
+    "git",
+    "profile",
+    "backup",
+    "dotfiles"
+  ],
+  "author": "FairmeHIT",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FairmeHIT/dsh-sync.git"
+  },
+  "homepage": "https://github.com/FairmeHIT/dsh-sync#readme",
+  "bugs": {
+    "url": "https://github.com/FairmeHIT/dsh-sync/issues"
+  },
+  "engines": {
+    "node": ">=22.19",
+    "dsh": ">=0.2.2-rc.3 <0.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-error": ">=0.2.2-rc.3 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.3 <0.3.0",
+    "@deepseek-ai/schemastery": ">=3.18.0 <4"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-error": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
+    "@deepseek-ai/schemastery": "3.19.0"
+  }
+}

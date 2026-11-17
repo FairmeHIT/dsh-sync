@@ -1,0 +1,5 @@
+# Bundle patch layer for dsh-config-git-sync.
+# The row loads the package's main entry as a plain Cordis plugin.
+- insert:
+    - id: config-sync
+      name: dsh-config-git-sync

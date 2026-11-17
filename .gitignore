@@ -1,0 +1,11 @@
+node_modules/
+*.log
+*.tgz
+.tmp/
+coverage/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

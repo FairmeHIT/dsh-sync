@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "配置同步",
+    "description": "通过你自己的私有 Git 仓库，在多台电脑之间同步这个 profile 的插件清单与 cordis.patch.yml。/sync-status 查看差异，/sync-push 推送，/sync-pull 预览，/sync-pull apply 应用。会覆盖其他电脑改动的推送默认被拒绝，除非强制。凭据永远不会被读取。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}
