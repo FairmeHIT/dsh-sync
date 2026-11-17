@@ -378,6 +378,12 @@ window.__ModuleLoader__.load({
             },
           ),
         ),
+        view.busy
+          ? h('progress', {
+              'aria-label': view.busyAction === 'push' ? copy.pushBusy : copy.pullBusy,
+              style: { width: '100%', height: '6px', accentColor: 'var(--dsw-alias-label-primary, currentColor)' },
+            })
+          : null,
         view.notice
           ? h(
               'div',

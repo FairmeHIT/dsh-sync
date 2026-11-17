@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-11-18
+
+### Added
+
+- Show an indeterminate progress bar while Push or Pull is running; it does not imply a percentage.
+
 ## [0.4.2] - 2026-11-18
 
 ### Fixed
