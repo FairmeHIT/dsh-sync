@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     var copy = zh
       ? {
           title: '配置同步',
-          subtitle: '通过私有 Git 仓库同步这个 profile 的插件清单',
+          subtitle: '一键换机，多端同步 · 私有 Git 同步插件清单与配置',
           remote: '远端',
           branch: '分支',
           profile: 'Profile',
@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
         }
       : {
           title: 'Config sync',
-          subtitle: 'Sync this profile through a private Git repository',
+          subtitle: 'One-click migration, multi-device sync · private Git for plugin manifest and config',
           remote: 'Remote',
           branch: 'Branch',
           profile: 'Profile',

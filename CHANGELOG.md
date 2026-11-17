@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-11-17
+
+### Changed
+
+- Put the user-facing promise up front: **一键换机，多端同步 / One-click migration, multi-device
+  sync**. The README, Plugin Manager description and Settings/Plugins card now say plainly that the
+  plugin manifest and `cordis.patch.yml` are what move between machines.
+- Documented the boundary: plugin settings stored in `cordis.patch.yml` (theme, skin, layout, model
+  lists) are restored after a pull; plugin-private files, browser storage and credentials are not.
+- Fixed the README design table to describe the current host **and** Web UI surface instead of the
+  old host-only wording.
+
 ## [0.4.0] - 2026-11-17
 
 ### Added

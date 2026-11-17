@@ -1,8 +1,10 @@
 # dsh-config-git-sync
 
-> Sync a DeepSeek Harness profile's plugin manifest and config overlay between machines through
-> **your own private Git repository**. No third-party sync service, no credential handling, and
-> Git history doubles as version history.
+> **One-click migration. Multi-device sync.**
+>
+> Your plugin manifest and `cordis.patch.yml` travel through **your own private Git repository**.
+> Pull on a new machine, install dependencies, restart, and keep working. “One-click” covers the
+> plugin manifest and config overlay; credentials, sessions and plugin-private data stay out.
 
 English | [中文](README.md)
 
@@ -28,7 +30,7 @@ Our trade-offs:
 | Read Git blobs; verify staged and committed bytes | Line endings, `.gitattributes` and `.gitignore` must not change managed content |
 | Pull deletes only files this machine previously synced | A first pull must not remove a local `cordis.patch.yml` or other unmanaged files |
 | `reconcile: none` by default | A remote `package.json` must not trigger install scripts by default |
-| Host-only, no Web UI | Commands/tools work in desktop and headless, with a smaller dependency surface |
+| Host tools + Web UI | Commands/tools work in desktop and headless; the web shell gets a Settings page and plugin-page card |
 | State + cross-process lock + snapshots | Avoid silent overwrites and half-written files across machines/sessions |
 
 This is not an all-in-one DSH configuration backup tool. It fits workflows that want the plugin
@@ -68,6 +70,26 @@ whole-machine migration including API keys, choose a tool dedicated to that job.
 `node_modules/`, `.plugin-manager/`, `.dsh-market/`, workspace registries or workspace files. The
 plugin only reads allowlisted files, and rejects a remote profile directory that contains any
 path outside the allowlist (`E_PATH`).
+
+### Does it sync a plugin's own settings?
+
+It depends on where the plugin stores them. DSH bundle / plugin settings usually live in the
+profile's `cordis.patch.yml`, for example:
+
+```yaml
+- id: ui-theme
+  config:
+    preference: light
+- id: ui-skin-claude-style
+  config:
+    brand: deepseek
+    typeface: claude
+```
+
+Those rows travel with `cordis.patch.yml`, so theme, skin, layout, model lists and similar overlay
+settings are restored after a Pull. If a plugin keeps state in its own data file, browser
+localStorage, `settings.yaml`, `.credentials.yaml` or its package directory, that path is not in
+the allowlist and is not synced; recreate it on the new machine.
 
 One repository can hold several profiles under `profiles/<profile>/` without interference. The
 manifest records a random device id, hostname, platform and DSH version as provenance; keep the
@@ -345,7 +367,8 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 - **No three-way merge.** Resolve divergence by pulling or forcing; the last explicit action wins.
 - Sessions, skills, memories, attachments, workspace registries and plugin-manager caches are out
   of scope.
-- Host-only: slash commands and tools, no browser settings panel.
+- Host tools plus a Web UI card: slash commands and model tools everywhere, with the same card in
+  Settings and on the plugin page where the web shell runs.
 - Tested on Windows; macOS and Linux use the same Node + Git path and are covered by CI, but a real
   desktop run on each platform is still recommended.
 - The npm package name differs from the repository name; install from GitHub or a local directory

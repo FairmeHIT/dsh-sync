@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Config sync",
-    "description": "Sync this profile's plugin manifest and cordis.patch.yml through your own private Git repository. /sync-status shows differences, /sync-push publishes, /sync-pull previews, and /sync-pull apply restores. A push that would overwrite another machine's changes is refused unless forced. Credentials are never read.",
+    "description": "One-click migration, multi-device sync. Sync this profile's plugin manifest and cordis.patch.yml through your own private Git repository; Pull on a new machine, install dependencies and restart. Credentials, sessions and plugin-private data stay out of the repository.",
     "detail": "docs/DETAIL.md"
   }
 }

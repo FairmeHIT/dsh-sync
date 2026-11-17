@@ -1,7 +1,9 @@
 # dsh-config-git-sync
 
-> 用你自己的 **私有 Git 仓库**，在多台电脑之间同步 DeepSeek Harness profile 的「插件清单 + 配置覆盖层」。
-> 不经过任何第三方同步服务，不碰凭据，Git 历史就是版本历史。
+> **一键换机，多端同步。**
+>
+> 插件清单和 `cordis.patch.yml` 跟着你自己的 **私有 Git 仓库**走；新电脑 Pull 一下，装依赖、重启，
+> 插件和配置接着用。一键指的是插件清单与配置覆盖层，凭据、会话和插件私有数据不进仓库。
 
 [English](README.en.md) | 中文
 
@@ -24,7 +26,7 @@
 | 从 Git blob 读取，push 校验暂存和提交字节 | 换行、`.gitattributes`、`.gitignore` 不应改变受管文件内容 |
 | pull 只删除本机同步过的文件 | 首次 pull 不误删本地已有的 `cordis.patch.yml` 等未受管文件 |
 | 默认 `reconcile: none` | 远端 `package.json` 不应在默认配置下触发安装脚本 |
-| host-only，不带 Web UI | 命令/工具在 desktop/headless 都能用，依赖面更小 |
+| host 工具 + Web UI | 命令/工具在 desktop/headless 都能用；Web 端提供设置页和插件页卡片 |
 | state + 跨进程锁 + 快照 | 多机器/多会话并发时避免静默覆盖和半写 |
 
 这不是一个“大而全”的 DSH 配置备份工具。它适合希望把插件清单和配置覆盖层纳入 Git 审计、又不想让
@@ -57,6 +59,24 @@ API 密钥和机器本地设置进入仓库的场景。如果你需要 settings/
 **绝不同步**：`.credentials.yaml`、sessions、`storages/`、skills、memories、附件、`node_modules/`、
 `.plugin-manager/`、`.dsh-market/`、工作区注册表或工作区文件。插件只读取允许列表中的文件；
 profile 目录里出现允许列表之外的路径时，远端读取会直接拒绝（`E_PATH`）。
+
+### 插件自己的配置会同步吗？
+
+看配置存在哪里。DSH 的 bundle / 插件配置通常写在 profile 的 `cordis.patch.yml`，例如：
+
+```yaml
+- id: ui-theme
+  config:
+    preference: light
+- id: ui-skin-claude-style
+  config:
+    brand: deepseek
+    typeface: claude
+```
+
+这些行会随 `cordis.patch.yml` 一起同步，新机器 Pull 后就能恢复主题、皮肤、界面布局、模型列表等
+覆盖层配置。若某个插件把设置存在自己的数据文件、浏览器 localStorage、`settings.yaml`、
+`.credentials.yaml` 或插件目录，这些不在允许列表内，不会同步，需要在新机器重新设置。
 
 一个仓库可以放多个 profile，各自位于 `profiles/<profile>/`，互不影响。`manifest.json` 会记录一个
 随机设备 ID、主机名、平台和 DSH 版本，仅用于来源提示；请保持仓库私有。
@@ -306,7 +326,7 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 
 - **没有三方合并**。冲突时先 pull 或显式 force，结果由最后一次操作决定。
 - 不同步 sessions、skills、memories、附件、workspace 注册表、插件管理器缓存。
-- 只提供 host 半侧（命令 + 工具），没有浏览器设置面板。
+- host 工具 + Web UI：命令和模型工具在所有端可用；Web 端在设置页和插件页提供同一张同步卡片。
 - Windows 已实测；macOS / Linux 走同样的 Node + Git 路径，CI 会覆盖测试，但真实桌面环境仍需自测。
 - npm 包名与仓库名不同；npm 发布前请从 GitHub 或本地目录安装。
 - 本插件自身的安装方式也会进入 `package.json`。如果一台机器用 `link:D:\...` 安装，另一台机器拉取后会得到
