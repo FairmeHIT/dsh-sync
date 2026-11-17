@@ -8,6 +8,37 @@
 > **仓库名与包名不同**：仓库是 [`FairmeHIT/dsh-sync`](https://github.com/FairmeHIT/dsh-sync)，npm 包名是
 > `dsh-config-git-sync`。npm 上的 `dsh-config-sync` 和 `dsh-sync` 已被其他项目占用，所以这里使用独立包名。
 
+## 为什么又做一个 sync 插件？
+
+DSH 生态里已经有 `dsh-sync` 和 `dsh-config-sync`。本项目不试图替代它们，而是解决一个更窄的问题：
+**在当前 DSH 0.2.2-rc.3 / 0.2.x 上，把任意 profile（包括 `desktop`）的插件清单和
+`cordis.patch.yml` 通过私有 Git 安全地同步。**
+
+- [`dsh-sync`](https://github.com/ZhenHuangLab/dsh-sync) 覆盖范围更大：settings 命名空间、home patch、
+  agent presets、Web 设置页和逐行冲突合并。截至 0.1.3，它的兼容基线是 DSH `0.1.0-rc.6`，profile 范围是
+  `web` / `headless`。
+- [`dsh-config-sync`](https://www.npmjs.com/package/dsh-config-sync) 是加密备份/换机迁移工具，
+  默认包含 API 凭据，不是持续 Git 同步。
+
+我们的取舍：
+
+| 取舍 | 原因 |
+|---|---|
+| 只同步 profile 的 `package.json` + `cordis.patch.yml`（可选 workspace/lock） | 这两类文件跨机器最需要一致，同时避免把 settings、凭据、presets 混进同步面 |
+| 支持任意 profile，包括 `desktop` | 不把桌面用户排除在外 |
+| push 冲突默认拒绝，而不是自动合并 | 配置文件是整体语义；宁可让用户 pull 或显式 force，也不静默覆盖另一台机器的改动 |
+| 从 Git blob 读取，push 校验暂存和提交字节 | 换行、`.gitattributes`、`.gitignore` 不应改变受管文件内容 |
+| pull 只删除本机同步过的文件 | 首次 pull 不误删本地已有的 `cordis.patch.yml` 等未受管文件 |
+| 默认 `reconcile: none` | 远端 `package.json` 不应在默认配置下触发安装脚本 |
+| host-only，不带 Web UI | 命令/工具在 desktop/headless 都能用，依赖面更小 |
+| state + 跨进程锁 + 快照 | 多机器/多会话并发时避免静默覆盖和半写 |
+
+如果你需要 settings + presets + Web 逐行合并，`dsh-sync` 更合适；如果你需要包含 API key 的加密整机
+迁移，`dsh-config-sync` 更合适。本项目只把“profile 插件清单的 Git 同步”做窄、做稳。
+
+> 本项目与上述两个包没有隶属关系。GitHub 仓库名 `dsh-sync` 与 `ZhenHuangLab/dsh-sync` 同名，
+> 但 npm 包名是 `dsh-config-git-sync`。
+
 ## 特性
 
 - **只同步该同步的**：插件清单、`cordis.patch.yml`，以及可选的 `pnpm-workspace.yaml` / `pnpm-lock.yaml`。

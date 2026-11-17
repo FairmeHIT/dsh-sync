@@ -11,6 +11,38 @@ English | [中文](README.md)
 > `dsh-config-git-sync`. The npm names `dsh-config-sync` and `dsh-sync` are already used by
 > unrelated projects, so this package uses its own name.
 
+## Why another sync plugin?
+
+The DSH ecosystem already has `dsh-sync` and `dsh-config-sync`. This project does not try to replace
+them; it solves a narrower problem: **sync the plugin manifest and `cordis.patch.yml` of any profile
+(desktop included) through a private Git repository on current DSH 0.2.2-rc.3 / 0.2.x.**
+
+- [`dsh-sync`](https://github.com/ZhenHuangLab/dsh-sync) covers a wider surface: settings namespaces,
+  home patches, agent presets, a Web settings page and per-line conflict merge. As of 0.1.3 its
+  compatibility baseline is DSH `0.1.0-rc.6`, and its profile scope is `web` / `headless`.
+- [`dsh-config-sync`](https://www.npmjs.com/package/dsh-config-sync) is an encrypted backup/migration
+  tool that includes API credentials by default; it is not continuous Git sync.
+
+Our trade-offs:
+
+| Choice | Why |
+|---|---|
+| Sync only the profile's `package.json` + `cordis.patch.yml` (optional workspace/lock) | These files must agree across machines, while settings, credentials and presets stay out of the sync surface |
+| Support any profile, including `desktop` | Desktop users are a first-class case |
+| Refuse a conflicting push instead of auto-merging | Config files are whole-document semantics; make the user pull or explicitly force rather than silently overwrite another machine |
+| Read Git blobs; verify staged and committed bytes | Line endings, `.gitattributes` and `.gitignore` must not change managed content |
+| Pull deletes only files this machine previously synced | A first pull must not remove a local `cordis.patch.yml` or other unmanaged files |
+| `reconcile: none` by default | A remote `package.json` must not trigger install scripts by default |
+| Host-only, no Web UI | Commands/tools work in desktop and headless, with a smaller dependency surface |
+| State + cross-process lock + snapshots | Avoid silent overwrites and half-written files across machines/sessions |
+
+If you need settings + presets + Web line-level merge, `dsh-sync` is the better fit. If you need
+encrypted whole-machine migration including API keys, `dsh-config-sync` is the better fit. This project
+keeps profile plugin-manifest Git sync narrow and predictable.
+
+> This project is not affiliated with either package. The GitHub repository is named `dsh-sync`, the
+> same as `ZhenHuangLab/dsh-sync`, but the npm package is `dsh-config-git-sync`.
+
 ## Highlights
 
 - **Only the right files**: the plugin manifest, `cordis.patch.yml`, and optional
