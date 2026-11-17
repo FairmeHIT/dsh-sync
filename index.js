@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { Config, PACKAGE_NAME, normalizeConfig } from './src/config.js'
 import { formatError, toToolError } from './src/errors.js'
+import { createHttpRoutes } from './src/http.js'
 import { pull, push, status } from './src/sync.js'
 
 export const name = PACKAGE_NAME
@@ -156,5 +157,15 @@ export function apply(ctx, rawConfig) {
         }),
       }),
     ])
+  })
+
+  // The Plugins-page card is a web feature. Keep it optional so the same host
+  // bundle still works in headless and CLI contexts without a connection.
+  ctx.inject(['connection'], (scope) => {
+    if (typeof scope.connection?.fetch?.register !== 'function') return
+    const routes = createHttpRoutes(config, { status, push, pull })
+    withEffect(scope, 'config-sync HTTP routes', () =>
+      routes.map((route) => scope.connection.fetch.register(route)),
+    )
   })
 }

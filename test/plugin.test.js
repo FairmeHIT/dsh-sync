@@ -25,9 +25,26 @@ function fakeScope(commands, disposers) {
   }
 }
 
-function fakeContext({ withCommands = true } = {}) {
+function fakeConnectionScope(routes, disposers) {
+  return {
+    connection: {
+      fetch: {
+        register(route) {
+          routes.push(route)
+          return () => {}
+        },
+      },
+    },
+    effect(execute) {
+      runEffect(execute, disposers)
+    },
+  }
+}
+
+function fakeContext({ withCommands = true, withConnection = false } = {}) {
   const tools = []
   const commands = []
+  const routes = []
   const disposers = []
   const ctx = {
     tools: {
@@ -41,11 +58,18 @@ function fakeContext({ withCommands = true } = {}) {
       runEffect(execute, disposers)
     },
     inject(services, callback) {
-      assert.deepEqual(services, ['commands'])
-      if (withCommands) callback(fakeScope(commands, disposers))
+      for (const service of services) {
+        assert.ok(['commands', 'connection'].includes(service), `unexpected service ${service}`)
+      }
+      if (services.includes('commands') && withCommands) {
+        callback(fakeScope(commands, disposers))
+      }
+      if (services.includes('connection') && withConnection) {
+        callback(fakeConnectionScope(routes, disposers))
+      }
     },
   }
-  return { ctx, tools, commands, disposers }
+  return { ctx, tools, commands, routes, disposers }
 }
 
 describe('plugin entry', () => {
@@ -115,6 +139,21 @@ describe('plugin entry', () => {
     const result = await pushCommand.handler()
     assert.equal(result.kind, 'error')
     assert.match(result.text, /^E_CONFIG:/)
+  })
+
+  test('registers three HTTP routes when a connection exists', () => {
+    const { ctx, routes, disposers } = fakeContext({ withConnection: true })
+    apply(ctx, {})
+    assert.deepEqual(routes.map((route) => route.path).sort(), [
+      '/api/config-sync/pull',
+      '/api/config-sync/push',
+      '/api/config-sync/status',
+    ])
+    for (const route of routes) {
+      assert.equal(typeof route.fetch, 'function')
+      assert.equal(route.requestBody, 'buffered')
+    }
+    assert.equal(disposers.length, 9)
   })
 
   test('loads without the optional commands service', () => {

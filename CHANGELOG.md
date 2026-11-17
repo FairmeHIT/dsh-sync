@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-17
+
+### Added
+
+- A sync card on the DSH Plugins page (`plugins.bundle.config`): remote, branch, profile, live
+  status, refresh, preview pull, confirmed apply pull, and push with an optional commit message.
+  The card uses the same `status` / `push` / `pull` implementations as the tools and commands.
+- Host JSON routes under `/api/config-sync/{status,push,pull}` for the card, with request
+  validation, structured error codes and credential masking. The UI deliberately does not expose
+  force; use `/sync-push --force` for that.
+- Tests for the route contracts, request validation, credential masking and browser bundle
+  registration; the suite now has 154 tests.
+
+### Changed
+
+- Package version is now 0.3.0; `package.json` adds `dsh.client` and the `./client` export, and
+  the published files include `client.js`.
+
 ## [0.2.0] - 2026-11-17
 
 First public release. The package is published as `dsh-config-git-sync`; the npm names

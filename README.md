@@ -38,6 +38,8 @@ API 密钥和机器本地设置进入仓库的场景。如果你需要 settings/
   `.gitattributes` 无法悄悄改写配置。
 - **冲突保护**：每台机器记录上次同步的提交和文件哈希。会覆盖其他电脑改动的 push 默认被拒绝，
   必须显式 `--force`。
+- **可视化**：在 DSH 的插件页面查看远端、分支、上次同步和差异，直接点 Pull / Push；与斜杠命令
+  走同一套同步逻辑。
 - **可恢复**：`pull apply` 前写快照；写入或校验失败时自动回滚本地受管文件。
 - **凭据隔离**：`.credentials.yaml`、session、skills、memories、附件和 `node_modules` 永远不在允许列表内。
 - **纯 Git**：SSH、HTTPS 或本地路径都行；插件以非交互方式调用 Git，不弹登录框。
@@ -154,6 +156,18 @@ dsh plugin --profile desktop add dsh-config-git-sync
 - 不要把 token 直接写进 `remote` URL。
 
 ## 使用
+
+### 插件页面
+
+重启 DSH 后，打开 **设置 → 插件**，进入 `dsh-config-git-sync` 的 bundle 页面，顶部会显示同步卡片。
+
+- 卡片显示远端、分支、profile 和当前状态；**刷新** 只读，不会写盘。
+- **预览 Pull** 等价于 `/sync-pull`，只显示差异。
+- **应用 Pull** 会先确认，再写快照并覆盖本地受管文件。插件依赖不会自动安装（`reconcile: none`），
+  需要再执行 `dsh plugin --profile desktop install` 并重启。
+- **Push** 可填写提交信息；UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
+- 卡片不可见时，先确认插件已安装并重启，再检查 `~/.dsh/cordis.patch.yml` 中的 `config.remote`；
+  接口地址是 `/api/config-sync/status`。
 
 ### 斜杠命令
 

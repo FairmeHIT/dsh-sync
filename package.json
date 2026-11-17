@@ -1,6 +1,6 @@
 {
   "name": "dsh-config-git-sync",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Git-backed sync for DeepSeek Harness profile plugin manifests and cordis.patch.yml.",
   "type": "module",
   "main": "index.js",
@@ -9,10 +9,12 @@
     ".": "./index.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
+    "./icon": "./icon.svg",
+    "./client": "./client.js"
   },
   "files": [
     "index.js",
+    "client.js",
     "src",
     "cordis.patch.yml",
     "icon.svg",
@@ -33,6 +35,11 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
     }
   },
   "keywords": [

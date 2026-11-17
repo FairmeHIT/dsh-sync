@@ -44,6 +44,8 @@ whole-machine migration including API keys, choose a tool dedicated to that job.
   committed bytes. Line-ending attributes and `.gitignore` cannot silently rewrite config.
 - **Conflict protection**: each machine records its last synced commit and file hashes. A push
   that would overwrite another machine's changes is refused unless explicitly forced.
+- **A page, not just commands**: see the remote, branch, last sync and diff on the plugin page,
+  then Pull or Push from there; it uses the same sync logic as the slash commands.
 - **Recoverable**: `pull apply` snapshots first and automatically rolls back managed files if a
   write or verification fails.
 - **Credential isolation**: `.credentials.yaml`, sessions, skills, memories, attachments and
@@ -168,6 +170,20 @@ login prompt and never stores a token.
 - Do not embed a token in the `remote` URL.
 
 ## Usage
+
+### Plugin page
+
+After restarting DSH, open **Settings → Plugins**, open the `dsh-config-git-sync` bundle, and use the
+sync card at the top.
+
+- The card shows the remote, branch, profile and current status. **Refresh** is read-only.
+- **Preview pull** is the same as `/sync-pull`; it writes nothing.
+- **Apply pull** asks for confirmation, snapshots, then overwrites managed local files. It does not
+  install dependencies (`reconcile: none`); run `dsh plugin --profile desktop install` and restart.
+- **Push** accepts a commit message. The UI does not expose force; use `/sync-push --force` when
+  needed.
+- If the card is missing, confirm the plugin is installed and DSH restarted, then check
+  `config.remote` in `~/.dsh/cordis.patch.yml`; the route is `/api/config-sync/status`.
 
 ### Slash commands
 

@@ -26,6 +26,10 @@ describe('package manifest', () => {
     assert.match(pkg.version, /^\d+\.\d+\.\d+$/)
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
     assert.equal(pkg.dsh.engines, undefined)
+    assert.equal(pkg.dsh.client.platform, 'web')
+    assert.equal(pkg.dsh.client.immediately, true)
+    assert.deepEqual(pkg.dsh.client.inject, [])
+    assert.equal(pkg.exports['./client'], './client.js')
     assert.match(pkg.engines.dsh, /^>=0\.2\.2-rc\.3 <0\.3\.0$/)
     assert.match(pkg.engines.node, />=22\.19/)
     assert.equal(pkg.repository.url, 'git+https://github.com/FairmeHIT/dsh-sync.git')
@@ -35,6 +39,7 @@ describe('package manifest', () => {
   test('packages every runtime and display resource', async () => {
     for (const path of [
       'index.js',
+      'client.js',
       'src',
       'cordis.patch.yml',
       'icon.svg',
@@ -51,7 +56,7 @@ describe('package manifest', () => {
     ]) {
       assert.ok(await exists(path), `missing ${path}`)
     }
-    for (const path of ['locale', 'docs', 'icon.svg', 'src', 'index.js']) {
+    for (const path of ['locale', 'docs', 'icon.svg', 'src', 'index.js', 'client.js']) {
       assert.ok(pkg.files.includes(path), `package.json files must include ${path}`)
     }
     assert.equal(pkg.exports['./locale/*.json'], './locale/*.json')
@@ -69,6 +74,88 @@ describe('package manifest', () => {
     assert.equal(lock.name, pkg.name)
     assert.equal(lock.version, pkg.version)
     assert.equal(lock.packages[''].name, pkg.name)
+  })
+})
+
+describe('browser bundle', () => {
+  test('loads through the ModuleLoader and registers the bundle-page card', async () => {
+    const client = await readFile(join(root, 'client.js'), 'utf8')
+    assert.ok(client.includes('window.__ModuleLoader__.load('))
+    assert.ok(client.includes(`id: '${pkg.name}'`))
+    assert.ok(client.includes('plugins.bundle.config'))
+    assert.ok(client.includes('scope.slots.register('))
+    assert.ok(client.includes('/api/config-sync/status'))
+  })
+
+  test('registers the card and reads status through the host route', async () => {
+    const client = await readFile(join(root, 'client.js'), 'utf8')
+    const calls = []
+    const React = {
+      createElement(type, props, ...children) {
+        return { type, props, children }
+      },
+      useState(initial) {
+        return [initial, () => {}]
+      },
+      useEffect(effect) {
+        effect()
+      },
+      useCallback(callback) {
+        return callback
+      },
+    }
+    let exported
+    let registered
+    const window = {
+      confirm: () => true,
+      __ModuleLoader__: {
+        load(definition) {
+          exported = definition.factory(() => React)
+        },
+      },
+    }
+    const fetch = async (path, options) => {
+      calls.push({ path, options })
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            remote: 'https://example.test/config.git',
+            branch: 'main',
+            profile: 'desktop',
+            text: 'Config sync status',
+          }
+        },
+      }
+    }
+
+    new Function('window', 'navigator', 'fetch', client)(window, { language: 'en' }, fetch)
+    assert.equal(exported.inject.length, 0)
+
+    exported.apply({
+      inject(services, callback) {
+        assert.deepEqual(services, ['slots'])
+        callback({
+          slots: {
+            inject(name, factory) {
+              assert.equal(name, 'plugins.bundle.config')
+              factory().next()
+            },
+            register(meta, component) {
+              registered = { meta, component }
+              return () => {}
+            },
+          },
+        })
+      },
+    })
+
+    assert.equal(registered.meta.name, 'plugins.bundle.config')
+    assert.equal(registered.meta.key, pkg.name)
+    assert.equal(registered.meta.order, 20)
+    registered.component()
+    assert.equal(calls[0].path, '/api/config-sync/status')
   })
 })
 
