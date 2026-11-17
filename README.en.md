@@ -202,7 +202,9 @@ After restarting DSH there are two entry points:
 - Sidebar **Plugins** → the `dsh-config-git-sync` bundle page: the same card, reachable from the
   plugin detail page.
 
-The card shows the remote, branch, profile and current status.
+The card shows the remote, branch, profile and current status. On a new machine, enter the private repository URL, branch (default `main`) and profile (blank for auto-detection) in the configuration form. Choose **Save configuration**, wait for effective readback verification, then refresh status or preview Pull. URLs containing passwords or tokens are rejected; configure a Git credential helper or SSH beforehand.
+
+**Storage and limitations:** the UI uses DSH's configuration editor to save in the running profile's configuration overlay, preserving unrelated fields. That file is also managed by sync, so applying Pull may replace the connection settings with remote content. Keep the repository URL available and check configuration again after Pull. For machine-local connection settings that must survive Pull, use the home layer instead. If a home or command-line overlay overrides the edited fields, the editor rejects the save; it does not rewrite higher-priority configuration.
 
 - The card shows the remote, branch, profile and current status. **Refresh** is read-only.
 - **Preview pull** is the same as `/sync-pull`; it writes nothing.

@@ -25,6 +25,39 @@ async function call(routes, path, { method = 'GET', body } = {}) {
   return { response, body: await response.json() }
 }
 
+test('configuration GET works without remote and never calls Git', async () => {
+  const routes = createHttpRoutes({ remote: '', branch: 'main' }, {})
+  const { body } = await call(routes, '/api/config-sync/config')
+  assert.equal(body.ok, true)
+  assert.equal(body.remote, '')
+  assert.equal(body.branch, 'main')
+  assert.equal(body.persistence, 'profile-patch')
+})
+
+test('configuration POST validates before saving and reports accepted, not verified', async () => {
+  let saved
+  const routes = createHttpRoutes(config, {}, { save: async (value) => { saved = value } })
+  const fields = { remote: 'git@example.com:me/config.git', branch: 'main', profile: '' }
+  const { response, body } = await call(routes, '/api/config-sync/config', { method: 'POST', body: fields })
+  assert.equal(response.status, 202)
+  assert.equal(body.accepted, true)
+  assert.equal(body.verified, false)
+  assert.deepEqual(saved, fields)
+  const invalid = await call(routes, '/api/config-sync/config', { method: 'POST', body: { ...fields, remote: 'https://u:secret@example.com/a' } })
+  assert.equal(invalid.response.status, 400)
+  assert.doesNotMatch(JSON.stringify(invalid.body), /secret/)
+})
+
+test('configuration save errors and invalid JSON do not echo raw errors', async () => {
+  const routes = createHttpRoutes(config, {}, { save: async () => { throw new Error('secret') } })
+  const result = await call(routes, '/api/config-sync/config', { method: 'POST', body: { remote: '', branch: 'main', profile: '' } })
+  assert.equal(result.body.ok, false)
+  assert.doesNotMatch(JSON.stringify(result.body), /secret/)
+  const invalid = await call(routes, '/api/config-sync/config', { method: 'POST', body: '{secret' })
+  assert.equal(invalid.response.status, 400)
+  assert.doesNotMatch(JSON.stringify(invalid.body), /secret/)
+})
+
 describe('config-sync HTTP routes', () => {
   test('declares one exact method per path', () => {
     const routes = createHttpRoutes(config, {
@@ -38,6 +71,7 @@ describe('config-sync HTTP routes', () => {
         [HTTP_ROUTES.status, ['GET']],
         [HTTP_ROUTES.push, ['POST']],
         [HTTP_ROUTES.pull, ['POST']],
+        [HTTP_ROUTES.config, ['GET', 'POST']],
       ],
     )
     for (const item of routes) assert.equal(item.requestBody, 'buffered')

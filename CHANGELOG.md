@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-18
+
+### Added
+
+- Remote repository, branch and profile configuration directly in the Settings and Plugins cards.
+- Persistent saves through DSH's configuration editor, with effective configuration readback after
+  plugin reload; unrelated configuration is preserved.
+- Strict configuration request validation, credential-bearing URL rejection, and explicit warnings
+  that profile-layer connection settings can be replaced by Pull.
+
 ## [0.4.3] - 2026-11-18
 
 ### Added

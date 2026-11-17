@@ -12,11 +12,12 @@ function deferred() {
   return { promise, resolve }
 }
 
-function setup({ language = 'en', confirm = true } = {}) {
+function setup({ language = 'en', confirm = true, configFailure = false, config = { ...status, remoteEditable: true, persistence: 'profile-patch' } } = {}) {
   let current, initial = true, effect, Card, exported
-  const calls = [], queue = []
+  const calls = [], queue = [], configCalls = [], configQueue = []
+  const timers = new Map(); let timerId = 0
   const React = {
-    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
     useState(value) {
       if (initial) current = value
       return [current, (next) => { current = typeof next === 'function' ? next(current) : next }]
@@ -26,11 +27,22 @@ function setup({ language = 'en', confirm = true } = {}) {
   }
   const window = { confirm: () => confirm, __ModuleLoader__: { load(def) { exported = def.factory(() => React) } } }
   const fetch = (path, options) => {
+    if (path === '/api/config-sync/config') {
+      configCalls.push({ path, options })
+      if (configFailure === true && configCalls.length === 1) return Promise.reject(new Error('offline'))
+      if (configFailure === 'hang' && configCalls.length === 1) return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+      const next = configQueue.length ? configQueue.shift() : response(config)
+      if (next === 'hang') return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+      return Promise.resolve(next)
+    }
     calls.push({ path, options })
     assert.ok(queue.length, `unexpected request: ${path}`)
     return Promise.resolve(queue.shift())
   }
-  new Function('window', 'navigator', 'fetch', source)(window, { language }, fetch)
+  new Function('window', 'navigator', 'fetch', 'setTimeout', 'clearTimeout', source)(window, { language }, fetch, (resolve, ms) => {
+    if (ms === 500) { resolve(); return 0 }
+    timers.set(++timerId, resolve); return timerId
+  }, (id) => timers.delete(id))
   exported.apply({ inject(_services, cb) { cb({ slots: {
     inject(_name, factory) { factory().next() },
     register(meta, component) { if (meta.name === 'plugins.bundle.config') Card = component },
@@ -43,12 +55,108 @@ function setup({ language = 'en', confirm = true } = {}) {
   const notice = () => { const node = find((n) => n.props.role === 'status'); return node && text(node) }
   const pre = () => text(find((n) => n.type === 'pre'))
   queue.push(response(status)); render(); effect()
-  return { calls, queue, render, find, text, button, notice, pre }
+  return { calls, queue, configCalls, configQueue, render, find, text, button, notice, pre, expire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((fn) => fn()) } }
 }
+
+test('failed initial config load cannot save unknown defaults and explicit retry restores form', async () => {
+  const ui = setup({ configFailure: true }); await tick()
+  assert.equal(ui.button('Save configuration').props.disabled, true)
+  assert.equal(ui.find((n) => n.props['aria-label'] === 'Remote').props.disabled, true)
+  ui.button('Save configuration').props.onClick(); await tick()
+  assert.equal(ui.configCalls.length, 1)
+  ui.button('Retry loading configuration').props.onClick(); await tick()
+  assert.equal(ui.button('Save configuration').props.disabled, false)
+  assert.equal(ui.find((n) => n.props['aria-label'] === 'Remote').props.value, 'repo')
+})
+
+test('hidden old remote requires explicit nonempty replacement, not branch-only save', async () => {
+  const ui = setup({ config: { ok: true, remote: '', branch: 'main', profile: '', remoteEditable: false } }); await tick()
+  ui.find((n) => n.props['aria-label'] === 'Branch').props.onChange({ target: { value: 'other' } })
+  assert.equal(ui.button('Save configuration').props.disabled, true)
+  ui.button('Save configuration').props.onClick(); await tick()
+  assert.equal(ui.configCalls.length, 1)
+  assert.ok(ui.find((n) => n.type === 'div' && /hidden.*replacement/i.test(ui.text(n))))
+  ui.find((n) => n.props['aria-label'] === 'Remote').props.onChange({ target: { value: '/srv/new.git' } })
+  assert.equal(ui.button('Save configuration').props.disabled, false)
+})
+
+test('config request abort deadline leaves save retryable and can recover initial load', async () => {
+  const ui = setup(); await tick()
+  ui.configQueue.push('hang')
+  ui.button('Save configuration').props.onClick(); await tick()
+  assert.ok(ui.configCalls[1].options.signal)
+  ui.expire(); await tick()
+  assert.equal(ui.button('Save configuration').props.disabled, false)
+  assert.ok(ui.find((n) => n.props.role === 'alert'))
+  assert.equal(ui.notice(), undefined)
+  ui.configQueue.push(response({ ok: true, accepted: true }), response({ ...status, remoteEditable: true }))
+  ui.queue.push(response(status))
+  ui.button('Save configuration').props.onClick(); await tick(); await tick()
+  assert.equal(ui.notice(), 'Configuration saved and verified.')
+})
+
+test('initial read and post-save verification read both time out without enabling unknown defaults', async () => {
+  const initial = setup({ configFailure: 'hang' }); await tick()
+  initial.expire(); await tick(); await tick()
+  assert.equal(initial.button('Save configuration').props.disabled, true)
+  initial.button('Retry loading configuration').props.onClick(); await tick(); await tick()
+  assert.equal(initial.button('Save configuration').props.disabled, false)
+  initial.configQueue.push(response({ ok: true, accepted: true }), 'hang')
+  initial.button('Save configuration').props.onClick(); await tick(); await tick()
+  initial.expire(); await tick(); await tick()
+  assert.equal(initial.notice(), undefined)
+  assert.equal(initial.button('Save configuration').props.disabled, false)
+  assert.ok(initial.find((n) => n.props.role === 'alert'))
+})
+
+test('config form loads empty values and warns about Pull overwriting profile patch', async () => {
+  const ui = setup({ config: { ok: true, remote: '', branch: 'main', profile: '', remoteEditable: true } }); await tick()
+  assert.equal(ui.find((n) => n.props['aria-label'] === 'Remote').props.value, '')
+  assert.ok(ui.find((n) => n.type === 'div' && /profile patch.*Pull/i.test(ui.text(n))))
+  assert.equal(ui.button('Save configuration').props.disabled, false)
+})
+
+test('config save disables sync, survives interrupted POST and verifies effective values', async () => {
+  const ui = setup(); await tick()
+  ui.find((n) => n.props['aria-label'] === 'Remote').props.onChange({ target: { value: 'https://example.com/config.git' } })
+  const pending = deferred()
+  ui.configQueue.push(pending.promise, response({ ok: true, remote: 'https://example.com/config.git', branch: 'main', profile: 'work', remoteEditable: true }))
+  ui.queue.push(response(status))
+  ui.button('Save configuration').props.onClick()
+  assert.equal(ui.button('Push').props.disabled, true)
+  assert.equal(ui.notice(), undefined)
+  pending.resolve(Promise.reject(new Error('disconnected'))); await tick()
+  assert.equal(ui.notice(), 'Configuration saved and verified.')
+  assert.equal(ui.configCalls[1].options.method, 'POST')
+  assert.equal(ui.configCalls[2].options?.method, undefined)
+})
+
+test('config save refuses to claim success on override and allows retry without masked prefill', async () => {
+  const ui = setup({ config: { ok: true, remote: '', branch: 'main', profile: '', remoteEditable: false } }); await tick()
+  const remote = ui.find((n) => n.props['aria-label'] === 'Remote')
+  assert.equal(remote.props.value, '')
+  remote.props.onChange({ target: { value: '/srv/new.git' } })
+  ui.configQueue.push(response({ ok: false, code: 'E_CONFIG_SAVE', message: 'Configuration could not be saved.' }, false))
+  ui.button('Save configuration').props.onClick(); await tick()
+  assert.equal(ui.notice(), undefined)
+  assert.equal(ui.button('Save configuration').props.disabled, false)
+})
+
+test('accepted save retries mismatched effective values and never calls it success', async () => {
+  const ui = setup(); await tick()
+  ui.find((n) => n.props['aria-label'] === 'Remote').props.onChange({ target: { value: '/srv/changed.git' } })
+  ui.configQueue.push(response({ ok: true, accepted: true, verified: false }))
+  ui.button('Save configuration').props.onClick()
+  for (let i = 0; i < 10; i++) await tick()
+  assert.equal(ui.configCalls.length, 14)
+  assert.equal(ui.notice(), undefined)
+  assert.ok(ui.find((n) => n.props.role === 'alert'))
+  assert.equal(ui.button('Save configuration').props.disabled, false)
+})
 
 test('push shows busy state, passes message, preserves success through refresh, then manual refresh clears it', async () => {
   const ui = setup(); await tick()
-  ui.find((n) => n.type === 'input').props.onChange({ target: { value: 'my commit' } })
+  ui.find((n) => n.props['aria-label'] === 'Commit message (optional)').props.onChange({ target: { value: 'my commit' } })
   const pending = deferred(); ui.queue.push(pending.promise)
   ui.button('Push').props.onClick()
   const progress = ui.find((n) => n.type === 'progress')
@@ -57,7 +165,7 @@ test('push shows busy state, passes message, preserves success through refresh, 
   assert.equal(ui.text(ui.button('Pushing…')), 'Pushing…')
   assert.ok(ui.find((n) => n.type === 'span' && ui.text(n) === 'Syncing…'))
   for (const n of ['Refresh', 'Preview pull', 'Apply pull', 'Pushing…']) assert.equal(ui.button(n).props.disabled, true)
-  assert.equal(ui.find((n) => n.type === 'input').props.disabled, true)
+  assert.equal(ui.find((n) => n.props['aria-label'] === 'Commit message (optional)').props.disabled, true)
   assert.equal(ui.calls[1].path, '/api/config-sync/push')
   assert.deepEqual(JSON.parse(ui.calls[1].options.body), { message: 'my commit' })
   const refreshing = deferred(); ui.queue.push(refreshing.promise)

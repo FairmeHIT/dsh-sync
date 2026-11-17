@@ -1,5 +1,6 @@
 import { PACKAGE_NAME } from './config.js'
 import { displayRemote } from './git.js'
+import { publicConfig, validateRemoteFields } from './remote-config.js'
 
 /**
  * Exact paths below the DSH web API prefix. The client card calls these with
@@ -9,6 +10,7 @@ export const HTTP_ROUTES = Object.freeze({
   status: '/api/config-sync/status',
   push: '/api/config-sync/push',
   pull: '/api/config-sync/pull',
+  config: '/api/config-sync/config',
 })
 
 class BadRequest extends Error {
@@ -80,7 +82,21 @@ function optionalMessage(body) {
  * Build Fetch routes for the Plugins-page card. Operations are injected so the
  * HTTP layer stays testable without a Git remote.
  */
-export function createHttpRoutes(config, operations) {
+export function createHttpRoutes(config, operations, editor) {
+  async function configRoute(request) {
+    if (request.method === 'GET') return json({ ok: true, ...publicConfig(config) })
+    try {
+      const fields = validateRemoteFields(await readBody(request))
+      if (!editor) return json({ ok: false, code: 'E_CONFIG_EDITOR', message: 'Configuration editor is unavailable.' }, 503)
+      await editor.save(fields)
+      // Reconciliation may dispose this handler: clients must GET the new instance.
+      return json({ ok: true, accepted: true, verified: false }, 202)
+    } catch (error) {
+      const known = ['E_CONFIG_INPUT', 'E_CONFIG_EDITOR', 'E_CONFIG_BUSY', 'E_CONFIG_SAVE'].includes(error?.code)
+      return json({ ok: false, code: known ? error.code : 'E_CONFIG_SAVE', message: known ? error.message : 'Configuration could not be saved. Retry after reload.' }, error instanceof BadRequest || error?.code === 'E_CONFIG_INPUT' ? 400 : 409)
+    }
+  }
+
   async function statusRoute() {
     try {
       const text = await operations.status(config)
@@ -133,6 +149,12 @@ export function createHttpRoutes(config, operations) {
       methods: ['POST'],
       requestBody: 'buffered',
       fetch: pullRoute,
+    },
+    {
+      path: HTTP_ROUTES.config,
+      methods: ['GET', 'POST'],
+      requestBody: 'buffered',
+      fetch: configRoute,
     },
   ]
 }

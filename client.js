@@ -14,6 +14,7 @@ window.__ModuleLoader__.load({
       status: '/api/config-sync/status',
       push: '/api/config-sync/push',
       pull: '/api/config-sync/pull',
+      config: '/api/config-sync/config',
     }
 
     var zh =
@@ -42,7 +43,12 @@ window.__ModuleLoader__.load({
           status: '状态',
           loading: '正在读取远端状态…',
           empty: '还没有状态。点“刷新”读取。',
-          noRemote: '还没有配置远端。请先在 ~/.dsh/cordis.patch.yml 的 config.remote 填写仓库地址。',
+          noRemote: '还没有配置远端。请在上方填写仓库地址并保存。',
+          retryConfig: '重试读取配置',
+          hiddenRemote: '现有远端已隐藏；必须填写非空替换地址才能保存，不能仅修改分支或 Profile。',
+          save: '保存配置', saving: '保存并核对中…', saved: '配置已保存并核对生效。',
+          saveError: '无法确认配置已生效。请检查高优先级覆盖或稍后重试。',
+          configWarning: '配置保存在 profile patch 中，Pull 可能覆盖这些设置。仅填写不含凭据的 HTTPS / SSH 地址，使用 Git 凭据管理器或 SSH；本地路径指服务器上当前信任用户可访问的路径。',
           applyConfirm: 'Pull 会覆盖本机受管文件。应用前会自动写快照。继续？',
           applied: '已应用远端配置。建议重启 DSH。',
           error: '操作失败',
@@ -69,7 +75,12 @@ window.__ModuleLoader__.load({
           status: 'Status',
           loading: 'Reading the remote status…',
           empty: 'No status yet. Choose Refresh.',
-          noRemote: 'No remote configured. Set config.remote in ~/.dsh/cordis.patch.yml first.',
+          noRemote: 'No remote configured. Enter a repository above and save.',
+          retryConfig: 'Retry loading configuration',
+          hiddenRemote: 'The existing remote is hidden. Enter a nonempty replacement before saving; branch-only edits cannot preserve a hidden remote.',
+          save: 'Save configuration', saving: 'Saving and verifying…', saved: 'Configuration saved and verified.',
+          saveError: 'Could not verify effective configuration. Check higher-priority overrides or retry after reload.',
+          configWarning: 'Saved in the profile patch; Pull may overwrite these settings. Use credential-free HTTPS / SSH with Git credential manager or SSH. Local paths refer to the server and its currently trusted user.',
           applyConfirm:
             'Pull will overwrite managed files on this machine. A snapshot is written first. Continue?',
           applied: 'Remote configuration applied. Restart DSH when convenient.',
@@ -90,6 +101,24 @@ window.__ModuleLoader__.load({
         throw failure
       }
       return data
+    }
+
+    async function configRequest(options) {
+      var controller = new AbortController()
+      var timer
+      var timeout = new Promise(function (_resolve, reject) {
+        timer = setTimeout(function () {
+          controller.abort()
+          var error = new Error(copy.saveError)
+          error.code = 'E_CONFIG_TIMEOUT'
+          reject(error)
+        }, 15000)
+      })
+      try {
+        return await Promise.race([request(ROUTES.config, { ...options, signal: controller.signal }), timeout])
+      } finally {
+        clearTimeout(timer)
+      }
     }
 
     function buttonStyle(primary) {
@@ -151,6 +180,12 @@ window.__ModuleLoader__.load({
         notice: '',
         result: '',
         message: '',
+        draft: { remote: '', branch: 'main', profile: '' },
+        configLoading: true,
+        configReady: false,
+        remoteHidden: false,
+        saving: false,
+        configError: null,
       })
       var view = state[0]
       var setView = state[1]
@@ -177,9 +212,20 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      async function loadConfig() {
+        setView(function (current) { return { ...current, configLoading: true, configReady: false, configError: null } })
+        try {
+          var data = await configRequest()
+          setView(function (current) { return { ...current, configLoading: false, configReady: true, remoteHidden: data.remoteEditable === false, draft: { remote: data.remoteEditable === false ? '' : data.remote, branch: data.branch, profile: data.profile } } })
+        } catch {
+          setView(function (current) { return { ...current, configLoading: false, configReady: false, configError: copy.saveError } })
+        }
+      }
+
       React.useEffect(
         function () {
           load(false)
+          loadConfig()
         },
         [load],
       )
@@ -214,8 +260,39 @@ window.__ModuleLoader__.load({
         }
       }
 
+      async function saveConfig() {
+        if (view.busy || view.saving || view.configLoading || !view.configReady || (view.remoteHidden && !view.draft.remote.trim())) return
+        var desired = { remote: view.draft.remote.trim(), branch: view.draft.branch.trim() || 'main', profile: view.draft.profile.trim() }
+        setView(function (current) { return { ...current, saving: true, configError: null, notice: '' } })
+        try {
+          try {
+            await configRequest({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(desired) })
+          } catch (error) {
+            // Transport loss is expected during plugin reconciliation, not success.
+            // An explicit server rejection is final and must not be hidden by GET.
+            if (error.code) throw error
+          }
+          var verified = null
+          for (var attempt = 0; attempt < 12; attempt++) {
+            if (attempt) await new Promise(function (resolve) { setTimeout(resolve, 500) })
+            try {
+              var effective = await configRequest()
+              if (effective.remoteEditable !== false && effective.remote === desired.remote && effective.branch === desired.branch && effective.profile === desired.profile) { verified = effective; break }
+            } catch (error) {
+              if (error.code === 'E_CONFIG_TIMEOUT') throw error
+              /* plugin may still be restarting */
+            }
+          }
+          if (!verified) throw new Error(copy.saveError)
+          setView(function (current) { return { ...current, saving: false, remoteHidden: false, notice: copy.saved, data: { ...current.data, ...verified } } })
+          await load(true)
+        } catch {
+          setView(function (current) { return { ...current, saving: false, configError: copy.saveError, notice: '' } })
+        }
+      }
+
       var data = view.data || {}
-      var disabled = view.busy || view.loading
+      var disabled = view.busy || view.loading || view.saving
       var statusText = view.result || data.text || ''
       var error = view.error
       var hint =
@@ -279,6 +356,29 @@ window.__ModuleLoader__.load({
           field(copy.remote, data.remote),
           field(copy.branch, data.branch),
           field(copy.profile, data.profile),
+        ),
+        h('div', { style: { display: 'grid', gap: '8px' } },
+          h('div', { style: { fontSize: '12px', lineHeight: 1.5 } }, copy.configWarning),
+          ['remote', 'branch', 'profile'].map(function (key) {
+            return h('label', { key: key, style: { display: 'grid', gap: '4px' } },
+              copy[key],
+              h('input', {
+                type: 'text', 'aria-label': copy[key], value: view.draft[key],
+                maxLength: key === 'remote' ? 2048 : key === 'branch' ? 200 : 100,
+                autoComplete: 'off', spellCheck: false,
+                disabled: disabled || view.configLoading || !view.configReady,
+                onChange: function (event) {
+                  var value = event.target.value
+                  setView(function (current) { return { ...current, draft: { ...current.draft, [key]: value } } })
+                },
+                style: { width: '100%', boxSizing: 'border-box', padding: '6px 10px', color: 'inherit', background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.08))', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35))', borderRadius: '8px' },
+              }),
+            )
+          }),
+          view.remoteHidden ? h('div', { style: { fontSize: '12px' } }, copy.hiddenRemote) : null,
+          !view.configReady ? h('button', { type: 'button', disabled: disabled || view.configLoading, onClick: loadConfig, style: buttonStyle(false) }, copy.retryConfig) : null,
+          h('button', { type: 'button', disabled: disabled || view.configLoading || !view.configReady || (view.remoteHidden && !view.draft.remote.trim()), onClick: saveConfig, style: buttonStyle(false) }, view.saving ? copy.saving : copy.save),
+          view.configError ? h('div', { role: 'alert' }, view.configError) : null,
         ),
         error
           ? h(
