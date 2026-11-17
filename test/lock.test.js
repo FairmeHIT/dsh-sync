@@ -45,7 +45,13 @@ describe('withLock', () => {
         events.push('b-end')
       }),
     ])
-    assert.deepEqual(events, ['a-start', 'a-end', 'b-start', 'b-end'])
+    // The lock guarantees mutual exclusion, not acquisition order: both
+    // callers start together and either may win the open(O_EXCL) race.
+    const expected =
+      events[0] === 'a-start'
+        ? ['a-start', 'a-end', 'b-start', 'b-end']
+        : ['b-start', 'b-end', 'a-start', 'a-end']
+    assert.deepEqual(events, expected)
   })
 
   test('reclaims a lock left by a dead process', async () => {
