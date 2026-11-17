@@ -189,6 +189,38 @@ dsh plugin --profile desktop add dsh-config-git-sync
 默认 `reconcile: none`，`pull apply` 只写文件，不会自动安装插件。B 机需要安装或更新插件时，请手动执行
 DSH 的插件安装，或在确认仓库可信后把 `reconcile` 设为 `install`。
 
+### 让新机器的 DSH 代你安装（可选）
+
+如果新机器已经能运行 DSH，并且当前会话有 shell / 文件工具权限，可以直接把下面两段提示词发给它。
+**这不是完全无人值守**：插件安装后必须重启 DSH，第二段要在重启后使用；安装依赖后还要再重启一次。
+Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YOURNAME`、`desktop` 和路径也要换成实际值。
+
+**第一段（重启前）**
+
+```text
+请帮我在这台机器安装并配置 DSH 同步插件：
+1. 执行 dsh plugin --profile desktop add github:FairmeHIT/dsh-sync。
+2. 如果 ~/.dsh/cordis.patch.yml 不存在就创建；如果已存在，只把下面这段追加到数组末尾，不要覆盖：
+- id: config-sync
+  config:
+    remote: 'git@github.com:YOURNAME/dsh-config.git'
+    branch: main
+    profile: desktop
+3. 不要写到 profile 的 cordis.patch.yml；完成后提醒我重启 DSH，不要尝试重启或结束当前进程。
+```
+
+**第二段（重启后）**
+
+```text
+继续完成 DSH 配置同步：
+1. 调用 config_sync_status 查看差异。
+2. 调用 config_sync_pull，参数 apply: true，应用远端配置。
+3. 执行 dsh plugin --profile desktop install 安装 profile 依赖。
+4. 完成后提醒我再次重启 DSH，不要尝试重启或结束当前进程。
+```
+
+工具不可用时，用 `/sync-status`、`/sync-pull`、`/sync-pull apply` 代替第二段的第 1–2 步。
+
 ## 冲突、强制与快照
 
 **push 的规则**：

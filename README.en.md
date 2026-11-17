@@ -202,6 +202,41 @@ file with machine A's copy. Move the settings to the home layer first.
 machine B, install or update plugins through DSH, or set `reconcile` to `install` after deciding the
 repository is trusted.
 
+### Let the new machine's DSH do the install (optional)
+
+If DSH is already running on the new machine and the current session has shell/file tools, paste the
+two prompts below. **This is not fully unattended**: DSH must be restarted after installing the
+plugin, the second prompt is for after that restart, and one more restart is needed after
+dependencies are installed. Configure Git authentication (SSH key or HTTPS credential) first, and
+replace `YOURNAME`, `desktop` and the path with real values.
+
+**Prompt 1 (before restart)**
+
+```text
+Install and configure DSH sync on this machine:
+1. Run dsh plugin --profile desktop add github:FairmeHIT/dsh-sync.
+2. Create ~/.dsh/cordis.patch.yml if it does not exist. If it exists, append the block below to the end of the array; do not overwrite existing content:
+- id: config-sync
+  config:
+    remote: 'git@github.com:YOURNAME/dsh-config.git'
+    branch: main
+    profile: desktop
+3. Do not write this to the profile's cordis.patch.yml. When done, tell me to restart DSH; do not try to restart or terminate the current process.
+```
+
+**Prompt 2 (after restart)**
+
+```text
+Continue the DSH config sync:
+1. Call config_sync_status to inspect differences.
+2. Call config_sync_pull with apply: true to apply the remote config.
+3. Run dsh plugin --profile desktop install to install profile dependencies.
+4. When done, tell me to restart DSH again; do not try to restart or terminate the current process.
+```
+
+If the tools are unavailable, use `/sync-status`, `/sync-pull`, and `/sync-pull apply` instead of
+steps 1–2 in the second prompt.
+
 ## Conflicts, force and snapshots
 
 **Push rules**:
