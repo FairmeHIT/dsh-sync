@@ -30,6 +30,7 @@ Our trade-offs:
 | Read Git blobs; verify staged and committed bytes | Line endings, `.gitattributes` and `.gitignore` must not change managed content |
 | Pull deletes only files this machine previously synced | A first pull must not remove a local `cordis.patch.yml` or other unmanaged files |
 | `reconcile: none` by default | A remote `package.json` must not trigger install scripts by default |
+| The synced copy drops this machine's `config-sync` row | The repository URL is machine-local; the row never reaches the remote, so it can never be written back over local settings |
 | Host tools + Web UI | Commands/tools work in desktop and headless; the web shell gets a Settings page and plugin-page card |
 | State + cross-process lock + snapshots | Avoid silent overwrites and half-written files across machines/sessions |
 
@@ -65,6 +66,11 @@ whole-machine migration including API keys, choose a tool dedicated to that job.
 | `profiles/<profile>/pnpm-workspace.yaml` | Optional, enabled with `includeWorkspace: true`; carries `allowBuilds` and similar install settings |
 | `profiles/<profile>/pnpm-lock.yaml` | Optional, enabled with `includeLockfile: true` |
 | `profiles/<profile>/manifest.json` | Hashes, sizes, plugin summary and device provenance |
+
+One line inside `profiles/<profile>/cordis.patch.yml` is the exception: this machine's own
+`- id: config-sync` row is stripped on push, so it never reaches the repository, and merged back
+after a Pull applies. The repository URL therefore survives a Pull.
+
 
 **Never synced**: `.credentials.yaml`, sessions, `storages/`, skills, memories, attachments,
 `node_modules/`, `.plugin-manager/`, `.dsh-market/`, workspace registries or workspace files. The
@@ -161,9 +167,10 @@ not synced, so every machine can keep its own path and settings:
     profile: desktop
 ```
 
-You can also put it in `~/.dsh/profiles/desktop/cordis.patch.yml`. That file is synced, so either
-every machine must use identical `remote` / `profile` / `branch`, or keep sync settings in the
-home layer so a pull cannot overwrite them.
+You can also put it in `~/.dsh/profiles/desktop/cordis.patch.yml`. That file is synced, but the
+`- id: config-sync` row itself is not: it is stripped on push and merged back after a Pull applies,
+so every machine keeps its own repository URL. The home layer is still the safer choice, because it
+has higher priority and is untouched by profile-level sync.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -204,12 +211,16 @@ After restarting DSH there are two entry points:
 
 The card shows the remote, branch, profile and current status. On a new machine, enter the private repository URL, branch (default `main`) and profile (blank for auto-detection) in the configuration form. Choose **Save configuration**, wait for effective readback verification, then refresh status or preview Pull. URLs containing passwords or tokens are rejected; configure a Git credential helper or SSH beforehand.
 
-**Storage and limitations:** the UI uses DSH's configuration editor to save in the running profile's configuration overlay, preserving unrelated fields. That file is also managed by sync, so applying Pull may replace the connection settings with remote content. Keep the repository URL available and check configuration again after Pull. For machine-local connection settings that must survive Pull, use the home layer instead. If a home or command-line overlay overrides the edited fields, the editor rejects the save; it does not rewrite higher-priority configuration.
+**Storage:** the UI uses DSH's configuration editor to save in the running profile's configuration overlay, preserving unrelated fields. That file is also managed by sync, but this machine's `- id: config-sync` row is treated as machine-local data: it is stripped on push and merged back after a Pull applies, so the saved repository URL is not cleared by Pull. The pull output reports `preserved: config-sync row (this machine)` and the card says so after applying. If a home or command-line overlay overrides the edited fields, the editor rejects the save; it does not rewrite higher-priority configuration.
 
 - The card shows the remote, branch, profile and current status. **Refresh** is read-only.
 - **Preview pull** is the same as `/sync-pull`; it writes nothing.
-- **Apply pull** asks for confirmation, snapshots, then overwrites managed local files. It does not
-  install dependencies (`reconcile: none`); run `dsh plugin --profile desktop install` and restart.
+- **Apply pull** asks for confirmation, snapshots, then overwrites managed local files. This
+  machine's `config-sync` row is preserved.
+- Apply pull does not install dependencies (`reconcile: none`). When the pull changed `package.json`,
+  a lockfile or the plugin list, the output states
+  `packages: manifest changed but dependencies were not installed (reconcile: none)` and
+  `next: dsh plugin --profile <profile> install`; the card shows the same command. Restart after it.
 - **Push** accepts a commit message. The UI does not expose force; use `/sync-push --force` when
   needed.
 - If the card is missing, confirm the plugin is installed and DSH restarted, then check
@@ -241,12 +252,12 @@ The card shows the remote, branch, profile and current status. On a new machine,
 5. On machine B: run `/sync-status`, then `/sync-pull`, then `/sync-pull apply`.
 6. Restart DSH.
 
-If machine B keeps sync settings in the profile `cordis.patch.yml`, the first `apply` replaces that
-file with machine A's copy. Move the settings to the home layer first.
+Machine B's `config-sync` row survives `apply`: machine A's copy does not contain it, and the local
+row is merged back. The home layer is still the safer place to keep it.
 
-`reconcile` defaults to `none`, so `pull apply` only writes files and does not install plugins. On
-machine B, install or update plugins through DSH, or set `reconcile` to `install` after deciding the
-repository is trusted.
+`reconcile` defaults to `none`, so `pull apply` only writes files and does not install plugins. Both
+the output and the card then name the next step: `dsh plugin --profile <profile> install`. You can
+also set `reconcile` to `install` after deciding the repository is trusted.
 
 ### Let the new machine's DSH do the install (optional)
 

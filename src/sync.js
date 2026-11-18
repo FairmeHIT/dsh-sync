@@ -1,7 +1,13 @@
 import { execFile } from 'node:child_process'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PACKAGE_NAME, requireBranch, requireRemote, resolveDshHome } from './config.js'
+import { PACKAGE_NAME, PLUGIN_ID, requireBranch, requireRemote, resolveDshHome } from './config.js'
+import {
+  CONNECTION_FILE,
+  mergeConnectionRow,
+  rowText,
+  stripConnectionRow,
+} from './connection-block.js'
 import { SyncError } from './errors.js'
 import {
   commitManagedFiles,
@@ -66,6 +72,31 @@ function shaMap(files) {
   return out
 }
 
+/**
+ * The connection row is machine-local, so it must never count as a difference:
+ * it is stripped from the synced copy on both sides and re-applied locally
+ * after a Pull. Slice through a latin1 view so every other byte round-trips
+ * unchanged, including CRLF and non-ASCII content.
+ */
+function withoutConnectionRow(ctx, files, manifest) {
+  const path = `profiles/${ctx.profile}/${CONNECTION_FILE}`
+  const data = files.get(path)
+  if (!data) return { files, manifest }
+  const stripped = Buffer.from(stripConnectionRow(data.toString('latin1'), PLUGIN_ID), 'latin1')
+  const nextFiles = new Map(files)
+  nextFiles.set(path, stripped)
+  const nextManifest = { ...manifest, files: { ...manifest.files } }
+  nextManifest.files[path] = { sha256: sha256(stripped), size: stripped.byteLength }
+  return { files: nextFiles, manifest: nextManifest }
+}
+
+/** This machine's own connection row, or null when it does not have one. */
+function localConnectionRow(ctx, local) {
+  const data = local.files.get(`profiles/${ctx.profile}/${CONNECTION_FILE}`)
+  if (!data) return null
+  return rowText(data.toString('latin1'), PLUGIN_ID)
+}
+
 async function localState(ctx, { requirePackage = false } = {}) {
   const files = await readLocalFiles(
     ctx.profileDir,
@@ -81,7 +112,9 @@ async function localState(ctx, { requirePackage = false } = {}) {
     dshVersion: await readDshVersion(),
     device: deviceInfo(id),
   })
-  return { files, manifest }
+  const normalized = withoutConnectionRow(ctx, files, manifest)
+  // `files` stays raw: snapshots and rollback must restore what was on disk.
+  return { files, manifest: normalized.manifest, syncedFiles: normalized.files }
 }
 
 /**
@@ -173,7 +206,18 @@ async function remoteState(ctx, work, { filter = true } = {}) {
     files.set(safe, data)
     kept[safe] = entry
   }
-  return { manifest: { ...manifest, files: kept }, files, commit: rev }
+  const manifestFiles = { ...manifest, files: kept }
+  // A repository written by an older version (or another machine) may still
+  // carry a connection row. Strip it here too so it is neither compared nor
+  // written back: the row belongs to the machine that runs the pull.
+  const normalized = withoutConnectionRow(ctx, files, manifestFiles)
+  return {
+    manifest: manifestFiles,
+    files,
+    commit: rev,
+    syncedManifest: normalized.manifest,
+    syncedFiles: normalized.files,
+  }
 }
 
 function header(ctx) {
@@ -221,10 +265,12 @@ async function statusLocked(ctx, options) {
     return lines.join('\n')
   }
 
-  const diff = diffManifests(local.manifest, remote.manifest)
+  const diff = diffManifests(local.manifest, remote.syncedManifest)
   const head = await headCommit(ctx.config, work, options.signal)
   const managed = managedSet(ctx.config, ctx.profile)
-  const remoteChanged = state ? changedFiles(state.files, shaMap(remote.manifest.files), managed) : null
+  const remoteChanged = state
+    ? changedFiles(state.files, shaMap(remote.syncedManifest.files), managed)
+    : null
   const localChanged = state ? changedFiles(state.files, shaMap(local.manifest.files), managed) : null
   lines.push(
     `remote commit: ${head ?? 'unknown'} (manifest ${sanitizeText(remote.manifest.generatedAt, 80)})`,
@@ -273,7 +319,7 @@ async function pushLocked(ctx, options) {
   const owned = new Set(Object.keys(state?.files ?? {}))
   const compareSet = new Set([...managed, ...owned])
 
-  if (remote !== null && sameSyncContent(local.manifest, remote.manifest)) {
+  if (remote !== null && sameSyncContent(local.manifest, remote.syncedManifest)) {
     const warning = await recordState(ctx.config, ctx.profile, {
       commit: remote.commit,
       files: shaMap(local.manifest.files),
@@ -297,7 +343,7 @@ async function pushLocked(ctx, options) {
         `remote already contains a manifest for profile "${ctx.profile}" and this machine has never synced; run /sync-pull first to adopt it, or push with force=true to overwrite it`,
       )
     }
-    const remoteChanged = changedFiles(state.files, shaMap(remote.manifest.files), compareSet)
+    const remoteChanged = changedFiles(state.files, shaMap(remote.syncedManifest.files), compareSet)
     if (remoteChanged.length > 0) {
       throw new SyncError(
         'E_CONFLICT',
@@ -311,7 +357,7 @@ async function pushLocked(ctx, options) {
   // their defaults would silently delete another machine's optional files.
   const preserved = new Map()
   if (remote) {
-    for (const [path, data] of remote.files) {
+    for (const [path, data] of remote.syncedFiles) {
       if (local.files.has(path) || owned.has(path)) continue
       preserved.set(path, data)
     }
@@ -320,7 +366,7 @@ async function pushLocked(ctx, options) {
   for (const [path, data] of preserved) {
     manifest.files[path] = { sha256: sha256(data), size: data.byteLength }
   }
-  if (remote !== null && sameSyncContent(manifest, remote.manifest)) {
+  if (remote !== null && sameSyncContent(manifest, remote.syncedManifest)) {
     const warning = await recordState(ctx.config, ctx.profile, {
       commit: remote.commit,
       files: shaMap(local.manifest.files),
@@ -344,7 +390,9 @@ async function pushLocked(ctx, options) {
   const prefix = `profiles/${ctx.profile}/`
   await rm(join(work, 'profiles', ctx.profile), { recursive: true, force: true })
   const committed = new Map()
-  for (const [path, data] of local.files) {
+  // Commit the normalized copy: this machine's connection row stays local, so
+  // another machine can never be handed a Git remote it did not configure.
+  for (const [path, data] of local.syncedFiles) {
     const safe = validateSyncPath(
       path,
       ctx.profile,
@@ -537,6 +585,16 @@ export async function reconcilePackages(ctx, options = {}) {
 }
 
 export async function pull(rawConfig, options = {}) {
+  const report = await pullReport(rawConfig, options)
+  return report.text
+}
+
+/**
+ * Same work as pull(), but keeps the machine-readable facts the callers need:
+ * whether the pull applied a package change without installing it, and whether
+ * this machine's own connection row was written back.
+ */
+export async function pullReport(rawConfig, options = {}) {
   requireRemote(rawConfig)
   const ctx = await resolveContext(rawConfig)
   return withLock(ctx.dshHome, () => pullLocked(ctx, options), { signal: options.signal })
@@ -554,21 +612,24 @@ async function pullLocked(ctx, options) {
     )
   }
 
-  const diff = diffManifests(local.manifest, remote.manifest)
+  // Compare against the normalized copy: this machine's own connection row is
+  // machine-local, so its presence must never look like drift.
+  const diff = diffManifests(local.manifest, remote.syncedManifest)
   const state = await readState(ctx.config, ctx.profile)
   const managed = managedSet(ctx.config, ctx.profile)
   const localChanged = state ? changedFiles(state.files, shaMap(local.manifest.files), managed) : []
+  const connectionRow = localConnectionRow(ctx, local)
 
   if (!diff.hasChanges) {
     let warning = null
     if (options.apply === true) {
       warning = await recordState(ctx.config, ctx.profile, {
         commit: remote.commit,
-        files: shaMap(remote.manifest.files),
+        files: shaMap(remote.syncedManifest.files),
         direction: 'pull',
       })
     }
-    return [
+    const text = [
       'Config sync pull',
       header(ctx),
       '',
@@ -577,10 +638,18 @@ async function pullLocked(ctx, options) {
     ]
       .filter(Boolean)
       .join('\n')
+    return { text, needsInstall: false, connectionPreserved: false }
   }
 
   if (options.apply !== true) {
     const lines = ['Config sync pull (dry run)', header(ctx), '', summarizeDiff(diff)]
+    if (connectionRow) {
+      lines.push(
+        '',
+        'preserved: config-sync row (this machine)',
+        'Applying keeps the Git remote on this machine; the row never travels.',
+      )
+    }
     if (localChanged.length > 0) {
       lines.push(
         '',
@@ -589,24 +658,32 @@ async function pullLocked(ctx, options) {
       )
     }
     lines.push('', 'Nothing written. Run /sync-pull apply to apply these files locally.')
-    return lines.join('\n')
+    return { text: lines.join('\n'), needsInstall: false, connectionPreserved: false }
   }
 
   const snapshot = await snapshotLocal(ctx, local)
   const prefix = `profiles/${ctx.profile}/`
   const owned = new Set(Object.keys(state?.files ?? {}))
   const kept = []
+  const connectionPath = `${prefix}${CONNECTION_FILE}`
+  const localConnectionText = connectionRow === null ? '' : String(local.files.get(connectionPath)?.toString('latin1') ?? '')
   try {
-    for (const [path, data] of remote.files) {
+    for (const [path, data] of remote.syncedFiles) {
       const safe = validateSyncPath(
         path,
         ctx.profile,
         ctx.config.includeLockfile,
         ctx.config.includeWorkspace,
       )
-      await writeFileAtomic(join(ctx.profileDir, safe.slice(prefix.length)), data)
+      // The connection row belongs to this machine: keep ours while replacing
+      // every other byte with the remote copy.
+      const outgoing =
+        connectionRow !== null && path === connectionPath
+          ? Buffer.from(mergeConnectionRow(data.toString('latin1'), localConnectionText, PLUGIN_ID), 'latin1')
+          : data
+      await writeFileAtomic(join(ctx.profileDir, safe.slice(prefix.length)), outgoing)
     }
-    for (const [path, data] of remote.files) {
+    for (const [path, data] of remote.syncedFiles) {
       const safe = validateSyncPath(
         path,
         ctx.profile,
@@ -614,7 +691,11 @@ async function pullLocked(ctx, options) {
         ctx.config.includeWorkspace,
       )
       const actual = await readFile(join(ctx.profileDir, safe.slice(prefix.length)))
-      if (!actual.equals(data)) {
+      const expected =
+        connectionRow !== null && path === connectionPath
+          ? Buffer.from(mergeConnectionRow(data.toString('latin1'), localConnectionText, PLUGIN_ID), 'latin1')
+          : data
+      if (!actual.equals(expected)) {
         throw new SyncError('E_APPLY', `written file does not match the remote: ${sanitizeText(safe, 160)}`)
       }
     }
@@ -623,7 +704,14 @@ async function pullLocked(ctx, options) {
     // machine) is kept and reported instead of being deleted.
     for (const name of allowedFiles(ctx.config.includeLockfile, ctx.config.includeWorkspace)) {
       const path = `${prefix}${name}`
-      if (remote.files.has(path)) continue
+      // The file was just written above when the remote manages it.
+      if (remote.syncedFiles.has(path)) continue
+      // This machine holds its own connection row in the file: deleting it
+      // would drop the Git remote, so keep and report it instead.
+      if (connectionRow !== null && path === connectionPath) {
+        kept.push(name)
+        continue
+      }
       if (owned.has(path)) await rm(join(ctx.profileDir, name), { force: true })
       else if (await pathExists(join(ctx.profileDir, name))) kept.push(name)
     }
@@ -645,10 +733,13 @@ async function pullLocked(ctx, options) {
 
   let install = null
   if (packageChanged) install = await reconcilePackages(ctx, { signal: options.signal })
+  // A skipped reconcile is a deliberate default, not a failure — but the
+  // dependencies are now missing on disk, so the next step has to be named.
+  const needsInstall = packageChanged && (install === null || install.skipped === true)
 
   const warning = await recordState(ctx.config, ctx.profile, {
     commit: remote.commit,
-    files: shaMap(remote.manifest.files),
+    files: shaMap(remote.syncedManifest.files),
     direction: 'pull',
   })
 
@@ -663,6 +754,9 @@ async function pullLocked(ctx, options) {
   if (localChanged.length > 0) {
     lines.push(`overwritten: local changes since last sync (${listPaths(localChanged)})`)
   }
+  if (connectionRow !== null) {
+    lines.push('preserved: config-sync row (this machine)')
+  }
   if (kept.length > 0) {
     lines.push(`kept locally: ${kept.join(', ')} (not previously synced by this machine)`)
   }
@@ -673,6 +767,12 @@ async function pullLocked(ctx, options) {
       lines.push(`packages: installed with ${install.tool}`)
     }
   }
+  if (needsInstall) {
+    lines.push(
+      `packages: manifest changed but dependencies were not installed (reconcile: ${ctx.config.reconcile})`,
+      `next: dsh plugin --profile ${ctx.profile} install`,
+    )
+  }
   if (diff.plugins.manual.length > 0) {
     lines.push(
       `manual: ${diff.plugins.manual.map((name) => sanitizeText(name, 120)).join(', ')} use link/file specs and must be restored by hand`,
@@ -680,5 +780,5 @@ async function pullLocked(ctx, options) {
   }
   if (warning) lines.push(`warning: ${warning}`)
   lines.push('', 'Restart DeepSeek Harness so cordis.patch.yml and plugin changes take effect.')
-  return lines.join('\n')
+  return { text: lines.join('\n'), needsInstall, connectionPreserved: connectionRow !== null }
 }

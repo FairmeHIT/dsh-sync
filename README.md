@@ -25,6 +25,7 @@
 | push 冲突默认拒绝，而不是自动合并 | 配置文件是整体语义；宁可让用户 pull 或显式 force，也不静默覆盖另一台机器的改动 |
 | 从 Git blob 读取，push 校验暂存和提交字节 | 换行、`.gitattributes`、`.gitignore` 不应改变受管文件内容 |
 | pull 只删除本机同步过的文件 | 首次 pull 不误删本地已有的 `cordis.patch.yml` 等未受管文件 |
+| 同步副本剔除本机 `config-sync` 行 | 仓库地址属于机器私有；该行不进仓库，也就不可能从仓库回来覆盖本机配置 |
 | 默认 `reconcile: none` | 远端 `package.json` 不应在默认配置下触发安装脚本 |
 | host 工具 + Web UI | 命令/工具在 desktop/headless 都能用；Web 端提供设置页和插件页卡片 |
 | state + 跨进程锁 + 快照 | 多机器/多会话并发时避免静默覆盖和半写 |
@@ -55,6 +56,8 @@ API 密钥和机器本地设置进入仓库的场景。如果你需要 settings/
 | `profiles/<profile>/pnpm-workspace.yaml` | 可选：`includeWorkspace: true` 时同步，包含 `allowBuilds` 等安装设置 |
 | `profiles/<profile>/pnpm-lock.yaml` | 可选：`includeLockfile: true` 时同步 |
 | `profiles/<profile>/manifest.json` | 哈希、大小、插件摘要、设备信息 |
+
+`profiles/<profile>/cordis.patch.yml` 里本机那条 `- id: config-sync` 例外：Push 时会被剔除，永远不会进入仓库；Pull 应用后会把本机这一行并回远端版本里，所以仓库地址不会被远端内容换掉。
 
 **绝不同步**：`.credentials.yaml`、sessions、`storages/`、skills、memories、附件、`node_modules/`、
 `.plugin-manager/`、`.dsh-market/`、工作区注册表或工作区文件。插件只读取允许列表中的文件；
@@ -145,8 +148,9 @@ dsh plugin --profile desktop add dsh-config-git-sync
     profile: desktop
 ```
 
-也可以写在 `~/.dsh/profiles/desktop/cordis.patch.yml`。注意：该文件本身会被同步，所以要么所有机器使用
-完全相同的 `remote` / `profile` / `branch`，要么把同步配置放在 home 级文件里，避免被远端版本覆盖。
+也可以写在 `~/.dsh/profiles/desktop/cordis.patch.yml`。该文件本身会被同步，但本机这条 `- id: config-sync`
+行不会：Push 时剔除、Pull 应用后并回，因此每台机器可以保留自己的仓库地址。仍然推荐 home 级文件，
+因为那里优先级更高、变更不会被 profile 层同步动作牵扯。
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
@@ -186,12 +190,14 @@ dsh plugin --profile desktop add dsh-config-git-sync
 
 卡片会显示远端、分支、profile 和当前状态。新机器无需先手写 YAML：在卡片的配置区填写私有仓库地址、分支（默认 `main`）和 profile（留空自动检测），点击 **保存配置**，等待回读确认后再刷新状态或预览 Pull。仓库地址不能包含密码或 Token；请预先配置 Git 凭据管理器或 SSH。
 
-**保存位置与限制**：UI 通过 DSH 配置编辑器保存到当前运行 profile 的配置覆盖层，保留其他配置字段。这个文件也属于同步范围，应用 Pull 可能把其中的同步连接配置替换成远端内容；因此首次 Pull 前请记住仓库地址，并在 Pull 后重新检查配置。需要机器独立且不随 Pull 覆盖的连接配置时，仍建议放在 home 层。若已有 home/命令行配置覆盖当前字段，编辑器会拒绝保存，界面会报告失败，不会修改高优先级配置。
+**保存位置**：UI 通过 DSH 配置编辑器保存到当前运行 profile 的配置覆盖层，保留其他配置字段。这个文件也属于同步范围，但本机 `- id: config-sync` 那一行被当作机器本地数据：Push 时剔除、Pull 应用后并回，所以保存的仓库地址不会因为 Pull 被清空。Pull 输出里会表示 `preserved: config-sync row (this machine)`，卡片也会在应用后提示。若已有 home/命令行配置覆盖当前字段，编辑器会拒绝保存，界面会报告失败，不会修改高优先级配置。
 
 - 卡片显示远端、分支、profile 和当前状态；**刷新** 只读，不会写盘。
 - **预览 Pull** 等价于 `/sync-pull`，只显示差异。
-- **应用 Pull** 会先确认，再写快照并覆盖本地受管文件。插件依赖不会自动安装（`reconcile: none`），
-  需要再执行 `dsh plugin --profile desktop install` 并重启。
+- **应用 Pull** 会先确认，再写快照并覆盖本地受管文件。本机 `config-sync` 行会被保留。
+- 插件依赖不会自动安装（`reconcile: none`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
+  输出会明确写 `packages: manifest changed but dependencies were not installed (reconcile: none)` 和
+  `next: dsh plugin --profile <profile> install`，卡片顶部也会提示这条命令；执行后再重启。
 - **Push** 可填写提交信息；UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
 - 卡片不可见时，先确认插件已安装并重启，再检查 `~/.dsh/cordis.patch.yml` 中的 `config.remote`；
   接口地址是 `/api/config-sync/status`。
@@ -224,11 +230,11 @@ dsh plugin --profile desktop add dsh-config-git-sync
 5. B 机依次执行 `/sync-status` → `/sync-pull` → `/sync-pull apply`。
 6. 重启 DSH。
 
-如果 B 机把同步配置写在 profile 的 `cordis.patch.yml` 里，第一次 `apply` 会用 A 机的版本覆盖它。
-建议先把同步配置放到 home 级文件。
+B 机的 `config-sync` 行在 `apply` 后会保留：A 机的版本里没有这一行，B 机自己的地址不会被换掉。
+home 级配置仍然是更稳妥的选择。
 
-默认 `reconcile: none`，`pull apply` 只写文件，不会自动安装插件。B 机需要安装或更新插件时，请手动执行
-DSH 的插件安装，或在确认仓库可信后把 `reconcile` 设为 `install`。
+默认 `reconcile: none`，`pull apply` 只写文件，不会自动安装插件。这时输出和卡片都会点名下一步：
+`dsh plugin --profile <profile> install`。也可以在确认仓库可信后把 `reconcile` 设为 `install` 自动安装。
 
 ### 让新机器的 DSH 代你安装（可选）
 
@@ -336,6 +342,8 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 - `pnpm-workspace.yaml` 里可能有 `allowBuilds` / `minimumReleaseAgeExclude` 等机器相关设置；
   开启 `includeWorkspace` 会一起同步，请确认你接受这种影响。
 - `cordis.patch.yml` 可能包含模型供应商的内联密钥；秘密扫描只是启发式，请自行确认后再 push。
+- 只保留本机 `- id: config-sync` 这一行；如果你把其它机器私有设置（例如本机路径、本机端口）写进
+  同一个 `cordis.patch.yml` 的别的行，它们仍会被同步、也会被 Pull 覆盖。这类设置请放在 home 层。
 - `reconcile` 默认 `none`；如果改为 `install`，远端 `package.json`（以及可选的 workspace 文件）可以选择
   要安装的包及其安装脚本，因此只应对可信仓库开启。
 - 本插件按 Git 对象的精确字节校验。如果另一台机器用 `core.autocrlf=true` 提交并改写了行尾，远端会报

@@ -139,8 +139,18 @@ export function createHttpRoutes(config, operations, editor) {
     try {
       body = await readBody(request)
       const apply = optionalBoolean(body, 'apply')
-      const text = await operations.pull(config, { apply })
-      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text) })
+      // pullReport() is preferred because it also carries the facts the card
+      // needs to name the follow-up step; a plain pull() still returns text.
+      const run = operations.pullReport ?? operations.pull
+      const report = await run(config, { apply })
+      const text = typeof report === 'string' ? report : String(report?.text ?? '')
+      return json({
+        ok: true,
+        ...identity(config),
+        text,
+        upToDate: upToDate(text),
+        needsInstall: typeof report === 'string' ? false : report?.needsInstall === true,
+      })
     } catch (error) {
       return failure(config, error, error instanceof BadRequest ? 400 : 200)
     }

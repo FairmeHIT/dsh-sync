@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { normalizeConfig } from '../src/config.js'
 import { ensureWorkTree, pushBranch } from '../src/git.js'
-import { pull, push, status } from '../src/sync.js'
+import { pull, pullReport, push, status } from '../src/sync.js'
 import { readState } from '../src/state.js'
 import {
   commitSymlink,
@@ -576,4 +577,259 @@ test('end-to-end: multiple profiles share one repository', { skip }, async () =>
     await git(remoteDir(root), ['show', 'main:profiles/web/package.json']),
     pkg({ context: '0.90.0' }).trim(),
   )
+})
+
+test('end-to-end: the connection row never enters the repository and survives a pull', { skip }, async (t) => {
+  const connection = (remote) =>
+    ['- id: config-sync', '  name: dsh-config-git-sync', '  config:', `    remote: ${remote}`, '    branch: main', '    profile: demo', ''].join('\n')
+
+  await t.test('push withholds the row so another machine can adopt the files', async () => {
+    const root = await setup()
+    const patch = `- insert:\n    - id: theme\n      name: dsh-theme\n${connection('https://example.com/a.git')}`
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': patch,
+    })
+    const configA = config(root, homeA)
+    const text = await push(configA, { message: 'initial' })
+    assert.match(text, /Pushed\./)
+    const remotePatch = await git(remoteDir(root), ['show', 'main:profiles/demo/cordis.patch.yml'])
+    assert.doesNotMatch(remotePatch, /config-sync/)
+    assert.doesNotMatch(remotePatch, /example\.com/)
+    assert.match(remotePatch, /id: theme/)
+    // The local file is untouched by push.
+    assert.equal(await readFile(join(homeA, 'profiles', 'demo', 'cordis.patch.yml'), 'utf8'), patch)
+  })
+
+  await t.test('pull keeps this machine connection row and reports it', async () => {
+    const root = await setup()
+    const remotePatch = '- insert:\n    - id: theme\n      name: dsh-theme\n'
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': remotePatch,
+    })
+    const localPatch = `${remotePatch}${connection('https://example.com/b.git')}`
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg({ context: '0.86.0' }),
+      'cordis.patch.yml': localPatch,
+    })
+    await push(config(root, homeA), { message: 'initial' })
+
+    const report = await pullReport(config(root, homeB), { apply: true })
+    assert.match(report.text, /preserved: config-sync row \(this machine\)/)
+    const applied = await readFile(join(homeB, 'profiles', 'demo', 'cordis.patch.yml'), 'utf8')
+    assert.match(applied, /remote: https:\/\/example\.com\/b\.git/)
+    assert.equal(applied.match(/- id: config-sync/g).length, 1)
+    assert.doesNotMatch(applied, /context/)
+  })
+
+  await t.test('a pull with only a row difference is already up to date and changes nothing', async () => {
+    const root = await setup()
+    const remotePatch = '- insert:\n    - id: theme\n      name: dsh-theme\n'
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': remotePatch,
+    })
+    const localPatch = `${remotePatch}${connection('https://example.com/c.git')}`
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg(),
+      'cordis.patch.yml': localPatch,
+    })
+    await push(config(root, homeA), { message: 'initial' })
+    // Adopt the remote first, then confirm the row alone is not drift.
+    await pull(config(root, homeB), { apply: true })
+    const statusText = await status(config(root, homeB))
+    assert.match(statusText, /No differences/)
+    const text = await pull(config(root, homeB), { apply: true })
+    assert.match(text, /Already up to date\./)
+    assert.match(
+      await readFile(join(homeB, 'profiles', 'demo', 'cordis.patch.yml'), 'utf8'),
+      /remote: https:\/\/example\.com\/c\.git/,
+    )
+  })
+
+  await t.test('a machine without a row adopts the remote files as they are', async () => {
+    const root = await setup()
+    const remotePatch = '- insert:\n    - id: theme\n      name: dsh-theme\n'
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': remotePatch,
+    })
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg({ context: '0.86.0' }),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    await push(config(root, homeA), { message: 'initial' })
+    const report = await pullReport(config(root, homeB), { apply: true })
+    assert.doesNotMatch(report.text, /preserved: config-sync row/)
+    assert.equal(report.connectionPreserved, false)
+    assert.equal(
+      await readFile(join(homeB, 'profiles', 'demo', 'cordis.patch.yml'), 'utf8'),
+      remotePatch,
+    )
+  })
+})
+
+test('end-to-end: a pull that changes packages names the install step when reconcile is none', { skip }, async (t) => {
+  await t.test('reports the manual install command after applying plugin changes', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg({ extra: 'dsh-extra' }),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg(),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    await push(config(root, homeA), { message: 'add plugin' })
+
+    const report = await pullReport(config(root, homeB), { apply: true })
+    assert.equal(report.needsInstall, true)
+    assert.match(report.text, /packages: manifest changed but dependencies were not installed \(reconcile: none\)/)
+    assert.match(report.text, /dsh plugin --profile demo install/)
+  })
+
+  await t.test('stays quiet when nothing package-related changed', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': '- insert:\n    - id: a\n',
+    })
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg(),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    await push(config(root, homeA), { message: 'patch only' })
+    const report = await pullReport(config(root, homeB), { apply: true })
+    assert.equal(report.needsInstall, false)
+    assert.doesNotMatch(report.text, /dsh plugin --profile/)
+  })
+
+  await t.test('a dry run and a no-op pull never claim the install step', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg({ extra: 'dsh-extra' }),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg(),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    await push(config(root, homeA), { message: 'add plugin' })
+    const preview = await pullReport(config(root, homeB))
+    assert.equal(preview.needsInstall, false)
+    assert.doesNotMatch(preview.text, /dsh plugin --profile/)
+
+    await pull(config(root, homeB), { apply: true })
+    const again = await pullReport(config(root, homeB), { apply: true })
+    assert.equal(again.needsInstall, false)
+    assert.match(again.text, /Already up to date\./)
+  })
+})
+
+test('end-to-end: an older repository may still carry a connection row', { skip }, async (t) => {
+  const connection = (remote) =>
+    ['- id: config-sync', '  name: dsh-config-git-sync', '  config:', `    remote: ${remote}`, '    branch: main', '    profile: demo', ''].join('\n')
+  const base = '- insert:\n    - id: theme\n      name: dsh-theme\n'
+
+  /** Commit a patch that still contains a row, with a manifest that matches it. */
+  async function commitLegacyRow(root, patchText) {
+    const manifest = JSON.parse(await git(remoteDir(root), ['show', 'main:profiles/demo/manifest.json']))
+    const bytes = Buffer.from(patchText)
+    manifest.files['profiles/demo/cordis.patch.yml'] = {
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      size: bytes.byteLength,
+    }
+    await commitToRemote(root, {
+      'profiles/demo/cordis.patch.yml': patchText,
+      'profiles/demo/manifest.json': `${JSON.stringify(manifest, null, 2)}\n`,
+    })
+  }
+
+  await t.test('the row is not reported as drift and the local one wins', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': base,
+    })
+    await push(config(root, homeA), { message: 'clean base' })
+    await commitLegacyRow(root, `${base}${connection('https://example.com/legacy.git')}`)
+
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg(),
+      'cordis.patch.yml': `${base}${connection('https://example.com/mine.git')}`,
+    })
+    // Only the row differs once the legacy row is stripped from the remote view.
+    assert.match(await status(config(root, homeB)), /No differences/)
+    const text = await pull(config(root, homeB), { apply: true })
+    assert.match(text, /Already up to date\./)
+    assert.match(
+      await readFile(join(homeB, 'profiles', 'demo', 'cordis.patch.yml'), 'utf8'),
+      /example\.com\/mine\.git/,
+    )
+  })
+
+  await t.test('applying replaces the legacy row instead of stacking a second one', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': base,
+    })
+    await push(config(root, homeA), { message: 'clean base' })
+    await commitLegacyRow(root, `${base}${connection('https://example.com/legacy.git')}`)
+
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg({ context: '0.86.0' }),
+      'cordis.patch.yml': `${base}${connection('https://example.com/mine.git')}`,
+    })
+    const report = await pullReport(config(root, homeB), { apply: true })
+    assert.equal(report.connectionPreserved, true)
+    const applied = await readFile(join(homeB, 'profiles', 'demo', 'cordis.patch.yml'), 'utf8')
+    assert.equal(applied.match(/- id: config-sync/g).length, 1)
+    assert.match(applied, /remote: https:\/\/example\.com\/mine\.git/)
+    assert.doesNotMatch(applied, /legacy\.git/)
+    // The rest of the pull still applied.
+    assert.match(applied, /id: theme/)
+    assert.match(await readFile(join(homeB, 'profiles', 'demo', 'package.json'), 'utf8'), /context/)
+  })
+})
+
+test('end-to-end: a patch that only holds the connection row still round-trips', { skip }, async (t) => {
+  const row = ['- id: config-sync', '  name: dsh-config-git-sync', '  config:', '    remote: https://example.com/only.git', '    branch: main', '    profile: demo', ''].join('\n')
+
+  await t.test('pushing a row-only patch leaves a valid, adoptable manifest', async () => {
+    const root = await setup()
+    const home = await makeMachine(root, 'home', {
+      'package.json': pkg(),
+      'cordis.patch.yml': row,
+    })
+    const cfg = config(root, home)
+    await push(cfg, { message: 'row only' })
+    const remotePatch = await git(remoteDir(root), ['show', 'main:profiles/demo/cordis.patch.yml'])
+    assert.doesNotMatch(remotePatch, /config-sync/)
+    // The manifest must not point at a file the repository lacks.
+    const manifest = JSON.parse(await git(remoteDir(root), ['show', 'main:profiles/demo/manifest.json']))
+    assert.ok(manifest.files['profiles/demo/cordis.patch.yml'])
+    // Status on the same machine stays clean: the row is not drift.
+    assert.match(await status(cfg), /No differences/)
+  })
+
+  await t.test('another machine keeps its own row and adopts the empty patch', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': row,
+    })
+    await push(config(root, homeA), { message: 'row only' })
+    const homeB = await makeMachine(root, 'homeB', {
+      'package.json': pkg({ context: '0.86.0' }),
+      'cordis.patch.yml': row.replace('only.git', 'b.git'),
+    })
+    const report = await pullReport(config(root, homeB), { apply: true })
+    assert.equal(report.connectionPreserved, true)
+    const applied = await readFile(join(homeB, 'profiles', 'demo', 'cordis.patch.yml'), 'utf8')
+    assert.match(applied, /example\.com\/b\.git/)
+    assert.doesNotMatch(applied, /only\.git/)
+    assert.equal(applied.match(/- id: config-sync/g).length, 1)
+  })
 })

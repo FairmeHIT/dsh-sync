@@ -48,9 +48,10 @@ window.__ModuleLoader__.load({
           hiddenRemote: '现有远端已隐藏；必须填写非空替换地址才能保存，不能仅修改分支或 Profile。',
           save: '保存配置', saving: '保存并核对中…', saved: '配置已保存并核对生效。',
           saveError: '无法确认配置已生效。请检查高优先级覆盖或稍后重试。',
-          configWarning: '配置保存在 profile patch 中，Pull 可能覆盖这些设置。仅填写不含凭据的 HTTPS / SSH 地址，使用 Git 凭据管理器或 SSH；本地路径指服务器上当前信任用户可访问的路径。',
+          configWarning: '配置保存在 profile patch 中；本机这一条 config-sync 行不会被 Pull 覆盖。仅填写不含凭据的 HTTPS / SSH 地址，使用 Git 凭据管理器或 SSH；本地路径指服务器上当前信任用户可访问的路径。',
           applyConfirm: 'Pull 会覆盖本机受管文件。应用前会自动写快照。继续？',
           applied: '已应用远端配置。建议重启 DSH。',
+          installNext: '已应用远端配置。请先运行“{command}”，然后重启 DSH。',
           requestTimeout: '请求超时，请稍后重试。',
           error: '操作失败',
         }
@@ -81,10 +82,11 @@ window.__ModuleLoader__.load({
           hiddenRemote: 'The existing remote is hidden. Enter a nonempty replacement before saving; branch-only edits cannot preserve a hidden remote.',
           save: 'Save configuration', saving: 'Saving and verifying…', saved: 'Configuration saved and verified.',
           saveError: 'Could not verify effective configuration. Check higher-priority overrides or retry after reload.',
-          configWarning: 'Saved in the profile patch; Pull may overwrite these settings. Use credential-free HTTPS / SSH with Git credential manager or SSH. Local paths refer to the server and its currently trusted user.',
+          configWarning: "Saved in the profile patch; Pull keeps this machine's config-sync row. Use credential-free HTTPS / SSH with Git credential manager or SSH. Local paths refer to the server and its currently trusted user.",
           applyConfirm:
             'Pull will overwrite managed files on this machine. A snapshot is written first. Continue?',
           applied: 'Remote configuration applied. Restart DSH when convenient.',
+          installNext: 'Remote configuration applied. Run "{command}", then restart DSH.',
           requestTimeout: 'The request timed out. Please retry.',
           error: 'Request failed',
         }
@@ -272,12 +274,17 @@ window.__ModuleLoader__.load({
           var text = data.text || ''
           // The server reports the no-change outcome as a structured field;
           // the regex is only a fallback for older plugin instances.
+          // A skipped dependency install is not a failure, but the plugins are
+          // missing until the command runs, so the notice names it.
+          var installCommand = data.needsInstall === true
+            ? 'dsh plugin --profile ' + ((data.profile || '').trim() || 'desktop') + ' install'
+            : ''
           var notice = data.upToDate === true || /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
             ? copy.upToDate
             : action === 'push'
               ? copy.pushDone
               : action === 'apply'
-                ? copy.applied
+                ? (installCommand ? copy.installNext.replace('{command}', installCommand) : copy.applied)
                 : copy.previewDone
           setView(function (current) {
             return { ...current, busy: false, busyAction: '', result: text, notice: notice }

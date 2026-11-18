@@ -285,3 +285,35 @@ test('a failed automatic status refresh leaves action success visible alongside 
   assert.ok(ui.find((n) => n.type === 'div' && ui.text(n).includes('E_STATUS — status failed')))
   assert.equal(ui.pre(), 'Pushed')
 })
+
+test('an applied pull that skipped the install names the command in the card', async () => {
+  const ui = setup(); await tick()
+  const pulled = {
+    ok: true, remote: 'repo', branch: 'main', profile: 'demo', upToDate: false, needsInstall: true,
+    text: [
+      'Config sync pull',
+      'preserved: config-sync row (this machine)',
+      'packages: manifest changed but dependencies were not installed (reconcile: none)',
+      'next: dsh plugin --profile demo install',
+    ].join('\n'),
+  }
+  ui.queue.push(response(pulled), response(status))
+  ui.button('Apply pull').props.onClick(); await tick(); await tick()
+  assert.equal(
+    ui.notice(),
+    'Remote configuration applied. Run "dsh plugin --profile demo install", then restart DSH.',
+  )
+  assert.match(ui.pre(), /dsh plugin --profile demo install/)
+})
+
+test('a preview never tells the user to install anything', async () => {
+  const ui = setup(); await tick()
+  const preview = {
+    ok: true, remote: 'repo', branch: 'main', profile: 'demo', upToDate: false, needsInstall: false,
+    text: ['Config sync pull (dry run)', 'Nothing written. Run /sync-pull apply to apply these files locally.'].join('\n'),
+  }
+  ui.queue.push(response(preview), response(status))
+  ui.button('Preview pull').props.onClick(); await tick(); await tick()
+  assert.equal(ui.notice(), 'Preview complete.')
+  assert.doesNotMatch(ui.notice(), /dsh plugin/)
+})

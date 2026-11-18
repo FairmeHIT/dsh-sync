@@ -180,3 +180,36 @@ describe('config-sync HTTP routes', () => {
     assert.equal(wrongType.body.code, 'E_REQUEST')
   })
 })
+
+test('a pull that skipped the install reports the follow-up step to the card', async () => {
+  const routes = createHttpRoutes(config, {
+    status: async () => 'Config sync status',
+    push: async () => 'Config sync push',
+    pull: async () => 'plain text pull',
+    pullReport: async (_config, options) => ({
+      text: [
+        'Config sync pull',
+        'packages: manifest changed but dependencies were not installed (reconcile: none)',
+        'next: dsh plugin --profile demo install',
+      ].join('\n'),
+      needsInstall: options.apply === true,
+      connectionPreserved: false,
+    }),
+  })
+  const applied = await call(routes, HTTP_ROUTES.pull, { method: 'POST', body: { apply: true } })
+  assert.equal(applied.body.ok, true)
+  assert.equal(applied.body.needsInstall, true)
+  assert.equal(applied.body.upToDate, false)
+  assert.match(applied.body.text, /dsh plugin --profile demo install/)
+
+  // A preview never claims the install step: nothing was written yet.
+  const preview = await call(routes, HTTP_ROUTES.pull, { method: 'POST', body: {} })
+  assert.equal(preview.body.needsInstall, false)
+})
+
+test('a pull without a report keeps needsInstall false instead of undefined', async () => {
+  const routes = createHttpRoutes(config, { pull: async () => 'Already up to date.' })
+  const { body } = await call(routes, HTTP_ROUTES.pull, { method: 'POST', body: { apply: true } })
+  assert.equal(body.needsInstall, false)
+  assert.equal(body.upToDate, true)
+})

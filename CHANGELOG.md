@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-18
+
+### Fixed
+
+- **Pull no longer wipes the machine's own sync settings.** The `- id: config-sync` row in
+  `profiles/<profile>/cordis.patch.yml` is machine-local: it is stripped from the synced copy before
+  a push, so it never reaches the repository, and it is merged back into the remote copy when a pull
+  applies. Saving the repository in the plugin card therefore survives later pulls and no longer
+  drops the machine back to `E_CONFIG`. A row that an older version already committed is stripped on
+  the read side too, so it is neither reported as a difference nor written back.
+- **A pull that skips the dependency install now names the next step.** With the default
+  `reconcile: none`, a pull that changes `package.json`, a lockfile or the plugin list printed
+  nothing about the missing packages. The report now includes
+  `packages: manifest changed but dependencies were not installed (reconcile: none)` and
+  `next: dsh plugin --profile <profile> install`, and the card shows the same command after Apply.
+
+### Added
+
+- `pullReport(config, { apply })` returns `{ text, needsInstall, connectionPreserved }` for callers
+  that need the machine-readable outcome; `pull()` keeps returning the text.
+- The pull HTTP route exposes a structured `needsInstall` field; `config_sync_pull` and
+  `/sync-pull` share the same report text.
+- `src/connection-block.js` locates, strips and merges the connection row by character offsets, so
+  every other byte of the file round-trips unchanged (CRLF and non-ASCII included).
+
 ## [0.5.1] - 2026-11-18
 
 ### Fixed
