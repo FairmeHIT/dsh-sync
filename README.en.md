@@ -209,7 +209,7 @@ After restarting DSH there are two entry points:
 - Sidebar **Plugins** → the `dsh-config-git-sync` bundle page: the same card, reachable from the
   plugin detail page.
 
-The card shows the remote, branch, profile and current status. On a new machine, enter the private repository URL, branch (default `main`) and profile (blank for auto-detection) in the configuration form. Choose **Save configuration**, wait for effective readback verification, then refresh status or preview Pull. URLs containing passwords or tokens are rejected; configure a Git credential helper or SSH beforehand.
+The card shows the remote, branch, profile and current status. On a new machine, open **Connection settings**, enter the private repository URL, branch (default `main`) and profile (blank for auto-detection), then choose **Save configuration** and wait for effective readback verification. URLs containing passwords or tokens are rejected; configure a Git credential helper or SSH beforehand. Connection settings and the full status text stay collapsed until needed, and open automatically on first run or when configuration cannot be loaded.
 
 **Storage:** the UI uses DSH's configuration editor to save in the running profile's configuration overlay, preserving unrelated fields. That file is also managed by sync, but this machine's `- id: config-sync` row is treated as machine-local data: it is stripped on push and merged back after a Pull applies, so the saved repository URL is not cleared by Pull. The pull output reports `preserved: config-sync row (this machine)` and the card says so after applying. If a home or command-line overlay overrides the edited fields, the editor rejects the save; it does not rewrite higher-priority configuration.
 
@@ -217,9 +217,11 @@ The card shows the remote, branch, profile and current status. On a new machine,
 - **Test connection** writes and then removes a `.config-sync-probe` marker file on the remote to
   prove the repository is readable and writable; it never touches synced content. A passing test
   prints `Connection test passed`.
-- **Preview pull** is the same as `/sync-pull`; it writes nothing.
-- **Apply pull** asks for confirmation, snapshots, then overwrites managed local files. This
-  machine's `config-sync` row is preserved.
+- **Preview pull** is the same as `/sync-pull`; it writes nothing. The card shows the dry-run diff
+  inline and only then offers **Apply pull** (or **Cancel**).
+- **Apply pull** writes a snapshot first, then overwrites managed local files. Because it only
+  appears after reviewing the preview, no separate browser confirmation is needed. This machine's
+  `config-sync` row is preserved.
 - Apply pull installs dependencies by default (`reconcile: install`). When the pull changed `package.json`,
   a lockfile or the plugin list, the plugin runs `pnpm install` (the DSH-bundled node+pnpm runtime first,
   then pnpm/corepack/npm from PATH) in the profile

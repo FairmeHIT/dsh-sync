@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The bundle card now reads as three plain steps.** A status card shows the
+  verdict, remote/branch/profile facts, Refresh and Test connection. A sync card
+  splits Pull from remote and Push to remote, with the pull preview rendered in
+  place and gated behind **Apply pull** / **Cancel**. Connection settings and the
+  full status text moved into collapsed sections that open automatically on first
+  run or when configuration cannot be loaded. The card uses the host theme tokens
+  and adapts to narrow layouts, and the preview hides the CLI-only identity block
+  and `/sync-pull apply` instruction already represented by the buttons.
+
 ## [0.7.1] - 2026-11-18
 
 ### Fixed

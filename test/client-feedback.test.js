@@ -12,7 +12,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-function setup({ language = 'en', confirm = true, configFailure = false, config = { ...status, remoteEditable: true, persistence: 'profile-patch' } } = {}) {
+function setup({ language = 'en', configFailure = false, config = { ...status, remoteEditable: true, persistence: 'profile-patch' } } = {}) {
   let current, initial = true, effect, Card, exported
   const calls = [], queue = [], configCalls = [], configQueue = []
   const timers = new Map(); let timerId = 0
@@ -26,7 +26,7 @@ function setup({ language = 'en', confirm = true, configFailure = false, config 
     useCallback: (callback) => callback,
     useEffect(fn) { if (initial) effect = fn },
   }
-  const window = { confirm: () => confirm, __ModuleLoader__: { load(def) { exported = def.factory(() => React) } } }
+  const window = { __ModuleLoader__: { load(def) { exported = def.factory(() => React) } } }
   const fetch = (path, options) => {
     if (path === '/api/config-sync/config') {
       configCalls.push({ path, options })
@@ -215,7 +215,7 @@ test('push shows busy state, passes message, preserves success through refresh, 
   assert.equal(progress.props.value, undefined)
   assert.equal(ui.text(ui.button('Pushing…')), 'Pushing…')
   assert.ok(ui.find((n) => n.type === 'span' && ui.text(n) === 'Syncing…'))
-  for (const n of ['Refresh', 'Preview pull', 'Apply pull', 'Pushing…']) assert.equal(ui.button(n).props.disabled, true)
+  for (const n of ['Refresh', 'Preview pull', 'Pushing…']) assert.equal(ui.button(n).props.disabled, true)
   assert.equal(ui.find((n) => n.props['aria-label'] === 'Commit message (optional)').props.disabled, true)
   assert.equal(ui.calls[1].path, '/api/config-sync/push')
   assert.deepEqual(JSON.parse(ui.calls[1].options.body), { message: 'my commit' })
@@ -248,20 +248,53 @@ test('preview busy state and no-op feedback, including Chinese locale', async ()
   assert.equal(ui.pre(), 'Already up to date.')
 })
 
-test('preview and apply success report distinct outcomes and confirm cancellation is inert', async () => {
+test('preview gates apply, trims CLI-only lines, and cancel discards the pending pull', async () => {
   const ui = setup(); await tick()
-  ui.queue.push(response({ ok: true, text: 'Nothing written.' }), response(status))
+  assert.equal(ui.find((n) => n.type === 'button' && ui.text(n) === 'Apply pull'), undefined)
+  const dryRun = [
+    'Config sync pull (dry run)',
+    'remote:  repo',
+    'branch:  main',
+    'profile: work',
+    '',
+    'Files:',
+    '  modified package.json',
+    '',
+    'Nothing written. Run /sync-pull apply to apply these files locally.',
+  ].join('\n')
+  ui.queue.push(response({ ok: true, text: dryRun }), response(status))
   ui.button('Preview pull').props.onClick(); await tick()
-  assert.equal(ui.notice(), 'Preview complete.')
-  assert.equal(ui.pre(), 'Nothing written.')
+  assert.equal(ui.notice(), 'Preview ready. Nothing has been written yet.')
+  assert.equal(ui.pre(), dryRun)
+  const preview = ui.find((n) => n.props.className === 'dcfg-preview-text')
+  assert.equal(ui.text(preview), 'Files:\n  modified package.json')
+  assert.doesNotMatch(ui.text(preview), /Config sync pull|\/sync-pull apply/)
+  assert.ok(ui.button('Apply pull'), 'apply appears only after a preview')
   ui.queue.push(response({ ok: true, text: 'Files applied' }), response(status))
   ui.button('Apply pull').props.onClick(); await tick()
   assert.deepEqual(JSON.parse(ui.calls[3].options.body), { apply: true })
   assert.equal(ui.notice(), 'Remote configuration applied. Restart DSH when convenient.')
-  const cancelled = setup({ confirm: false }); await tick()
-  cancelled.button('Apply pull').props.onClick(); await tick()
-  assert.equal(cancelled.calls.length, 1)
+  assert.equal(ui.find((n) => n.type === 'button' && ui.text(n) === 'Apply pull'), undefined)
+
+  const cancelled = setup(); await tick()
+  cancelled.queue.push(response({ ok: true, text: 'Nothing written.' }), response(status))
+  cancelled.button('Preview pull').props.onClick(); await tick()
+  const beforeCancel = cancelled.calls.length
+  cancelled.button('Cancel').props.onClick(); await tick()
+  assert.equal(cancelled.calls.length, beforeCancel)
   assert.equal(cancelled.notice(), undefined)
+  assert.equal(cancelled.find((n) => n.type === 'button' && cancelled.text(n) === 'Apply pull'), undefined)
+})
+
+test('a failed re-preview drops the stale apply action', async () => {
+  const ui = setup(); await tick()
+  ui.queue.push(response({ ok: true, text: 'Preview one.' }), response(status))
+  ui.button('Preview pull').props.onClick(); await tick()
+  assert.ok(ui.button('Apply pull'))
+  ui.queue.push(response({ ok: false, code: 'E_PULL', message: 'remote unavailable' }, false))
+  ui.button('Preview pull').props.onClick(); await tick()
+  assert.equal(ui.find((n) => n.type === 'button' && ui.text(n) === 'Apply pull'), undefined)
+  assert.ok(ui.find((n) => n.type === 'div' && ui.text(n).includes('E_PULL — remote unavailable')))
 })
 
 test('failure removes success feedback, displays error, and permits retry', async () => {
@@ -297,6 +330,8 @@ test('an applied pull that skipped the install names the command in the card', a
       'next: dsh plugin --profile demo install',
     ].join('\n'),
   }
+  ui.queue.push(response({ ok: true, text: 'Preview: manifest changed.' }), response(status))
+  ui.button('Preview pull').props.onClick(); await tick()
   ui.queue.push(response(pulled), response(status))
   ui.button('Apply pull').props.onClick(); await tick(); await tick()
   assert.equal(
@@ -314,6 +349,6 @@ test('a preview never tells the user to install anything', async () => {
   }
   ui.queue.push(response(preview), response(status))
   ui.button('Preview pull').props.onClick(); await tick(); await tick()
-  assert.equal(ui.notice(), 'Preview complete.')
+  assert.equal(ui.notice(), 'Preview ready. Nothing has been written yet.')
   assert.doesNotMatch(ui.notice(), /dsh plugin/)
 })

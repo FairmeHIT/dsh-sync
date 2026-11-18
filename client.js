@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     var copy = zh
       ? {
           title: '配置同步',
-          subtitle: '一键换机，多端同步 · 私有 Git 同步插件清单与配置',
+          subtitle: '一键换机，多端同步 · 用私有 Git 同步插件清单与配置',
           remote: '远端',
           branch: '分支',
           profile: 'Profile',
@@ -32,28 +32,41 @@ window.__ModuleLoader__.load({
           test: '测试连接',
           testBusy: '测试中…',
           testDone: '连接测试通过：远端可读写。',
+          status: '状态',
+          ready: '就绪',
+          inSync: '已与远端一致',
+          changes: '有差异',
+          differences: '发现差异，建议先预览',
+          statusUnavailable: '状态不可用',
+          syncTitle: '同步',
+          pullTitle: '从远端拉取',
+          pullHint: '先预览远端改动，确认后再写入本机。',
           preview: '预览 Pull',
+          previewTitle: '待应用的改动',
+          applyHint: '应用前会自动写入本机快照。',
           apply: '应用 Pull',
+          cancel: '取消',
+          pushTitle: '推送到远端',
+          pushHint: '把本机的 Profile 与插件清单发布到私有仓库。',
           push: 'Push',
           syncBusy: '同步中…',
           pullBusy: 'Pull 中…',
           pushBusy: 'Push 中…',
           pushDone: 'Push 完成：远端已更新。',
-          pullDone: 'Pull 完成。',
-          previewDone: '预览完成。',
+          previewReady: '预览完成，尚未写入任何文件。',
           upToDate: '已是最新，没有需要同步的改动。',
           message: '提交信息（可选）',
           messageHint: '留空则自动生成',
-          status: '状态',
           loading: '正在读取远端状态…',
           empty: '还没有状态。点“刷新”读取。',
-          noRemote: '还没有配置远端。请在上方填写仓库地址并保存。',
+          noRemote: '还没有配置远端。请在“连接设置”中填写仓库地址并保存。',
+          advanced: '连接设置',
+          output: '状态详情',
           retryConfig: '重试读取配置',
           hiddenRemote: '现有远端已隐藏；必须填写非空替换地址才能保存，不能仅修改分支或 Profile。',
           save: '保存配置', saving: '保存并核对中…', saved: '配置已保存并核对生效。',
           saveError: '无法确认配置已生效。请检查高优先级覆盖或稍后重试。',
           configWarning: '配置保存在 profile patch 中；本机这一条 config-sync 行不会被 Pull 覆盖。仅填写不含凭据的 HTTPS / SSH 地址，使用 Git 凭据管理器或 SSH；本地路径指服务器上当前信任用户可访问的路径。',
-          applyConfirm: 'Pull 会覆盖本机受管文件。应用前会自动写快照。继续？',
           applied: '已应用远端配置。建议重启 DSH。',
           installNext: '已应用远端配置。请先运行“{command}”，然后重启 DSH。',
           requestTimeout: '请求超时，请稍后重试。',
@@ -62,7 +75,7 @@ window.__ModuleLoader__.load({
         }
       : {
           title: 'Config sync',
-          subtitle: 'One-click migration, multi-device sync · private Git for plugin manifest and config',
+          subtitle: 'One-click migration, multi-device sync · private Git for your plugin manifest and config',
           remote: 'Remote',
           branch: 'Branch',
           profile: 'Profile',
@@ -70,35 +83,110 @@ window.__ModuleLoader__.load({
           test: 'Test connection',
           testBusy: 'Testing…',
           testDone: 'Connection test passed: the remote is readable and writable.',
+          status: 'Status',
+          ready: 'Ready',
+          inSync: 'In sync with remote',
+          changes: 'Changes',
+          differences: 'Differences found — preview before pulling',
+          statusUnavailable: 'Status unavailable',
+          syncTitle: 'Sync',
+          pullTitle: 'Pull from remote',
+          pullHint: 'Preview the remote changes first; nothing is written until you apply.',
           preview: 'Preview pull',
+          previewTitle: 'Changes to apply',
+          applyHint: 'A snapshot is written before files are overwritten.',
           apply: 'Apply pull',
+          cancel: 'Cancel',
+          pushTitle: 'Push to remote',
+          pushHint: "Publish this machine's profile and plugin manifest to the private repository.",
           push: 'Push',
           syncBusy: 'Syncing…',
           pullBusy: 'Pulling…',
           pushBusy: 'Pushing…',
           pushDone: 'Push complete: the remote is updated.',
-          pullDone: 'Pull complete.',
-          previewDone: 'Preview complete.',
+          previewReady: 'Preview ready. Nothing has been written yet.',
           upToDate: 'Already up to date; nothing to sync.',
           message: 'Commit message (optional)',
           messageHint: 'Leave blank to auto-generate',
-          status: 'Status',
           loading: 'Reading the remote status…',
           empty: 'No status yet. Choose Refresh.',
-          noRemote: 'No remote configured. Enter a repository above and save.',
+          noRemote: 'No remote configured. Open Connection settings, enter a repository, and save.',
+          advanced: 'Connection settings',
+          output: 'Status details',
           retryConfig: 'Retry loading configuration',
           hiddenRemote: 'The existing remote is hidden. Enter a nonempty replacement before saving; branch-only edits cannot preserve a hidden remote.',
           save: 'Save configuration', saving: 'Saving and verifying…', saved: 'Configuration saved and verified.',
           saveError: 'Could not verify effective configuration. Check higher-priority overrides or retry after reload.',
           configWarning: "Saved in the profile patch; Pull keeps this machine's config-sync row. Use credential-free HTTPS / SSH with Git credential manager or SSH. Local paths refer to the server and its currently trusted user.",
-          applyConfirm:
-            'Pull will overwrite managed files on this machine. A snapshot is written first. Continue?',
           applied: 'Remote configuration applied. Restart DSH when convenient.',
           installNext: 'Remote configuration applied. Run "{command}", then restart DSH.',
           requestTimeout: 'The request timed out. Please retry.',
           busyElsewhere: 'Another sync is already running (possibly from this machine or another window). Retry shortly.',
           error: 'Request failed',
         }
+
+    var CSS = `
+.dcfg-root { display:flex; flex-direction:column; gap:12px; padding:2px 0 16px; color:var(--dsw-alias-label-primary, inherit); font-size:13px; line-height:1.55; }
+.dcfg-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.dcfg-headtext { min-width:0; }
+.dcfg-title { margin:0; font-size:15px; font-weight:600; letter-spacing:.01em; }
+.dcfg-subtitle { margin:2px 0 0; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12.5px; }
+.dcfg-chip { flex:0 0 auto; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.3)); border-radius:999px; padding:2px 9px; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12px; white-space:nowrap; }
+.dcfg-card { border:1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.22)); border-radius:12px; background:var(--dsw-alias-bg-layer-1, transparent); padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+.dcfg-cardtitle { font-size:13.5px; font-weight:600; }
+.dcfg-verdict { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; }
+.dcfg-dot { width:8px; height:8px; border-radius:50%; background:currentColor; flex:0 0 auto; }
+.dcfg-verdict-ok { color:var(--dsw-alias-state-success-primary, #2f9e63); }
+.dcfg-verdict-warn { color:var(--dsw-alias-state-warn-primary, #b7791f); }
+.dcfg-verdict-muted { color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); }
+.dcfg-facts { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr); gap:6px 16px; }
+.dcfg-fact { min-width:0; }
+.dcfg-key { color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:11.5px; }
+.dcfg-val { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; }
+.dcfg-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.dcfg-btn { appearance:none; font:inherit; font-size:12.5px; line-height:1.4; padding:6px 12px; border-radius:8px; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35)); background:var(--dsw-alias-bg-layer-2, rgba(127,127,127,.06)); color:inherit; cursor:pointer; }
+.dcfg-btn:hover:not(:disabled) { border-color:var(--dsw-alias-brand-primary, currentColor); }
+.dcfg-btn:disabled { opacity:.55; cursor:default; }
+.dcfg-btn-primary { background:var(--dsw-alias-brand-primary, #3b82f6); border-color:transparent; color:#fff; }
+.dcfg-btn-primary:hover:not(:disabled) { opacity:.92; }
+.dcfg-syncgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); align-items:start; gap:12px; }
+.dcfg-section { display:flex; flex-direction:column; gap:8px; border:1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.22)); border-radius:10px; background:var(--dsw-alias-bg-layer-2, rgba(127,127,127,.03)); padding:12px; }
+.dcfg-sectiontitle { font-size:13px; font-weight:600; }
+.dcfg-hint { color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12.5px; }
+.dcfg-warn { color:var(--dsw-alias-state-warn-primary, #b7791f); }
+.dcfg-field { display:grid; gap:4px; }
+.dcfg-field > span { color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12px; }
+.dcfg-input { width:100%; box-sizing:border-box; font:inherit; font-size:12.5px; padding:6px 10px; border:1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.3)); border-radius:8px; background:var(--dsw-alias-bg-base, transparent); color:inherit; }
+.dcfg-input:focus { outline:none; border-color:var(--dsw-alias-brand-primary, currentColor); }
+.dcfg-input:disabled { opacity:.6; }
+.dcfg-notice { border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35)); border-radius:9px; padding:8px 10px; font-size:12.5px; line-height:1.5; }
+.dcfg-notice-ok { border-color:var(--dsw-alias-state-success-primary, #2f9e63); }
+.dcfg-notice-error { border-color:var(--dsw-alias-state-error-primary, #d14343); color:var(--dsw-alias-state-error-primary, #d14343); }
+.dcfg-preview { border:1px dashed var(--dsw-alias-border-l2, rgba(127,127,127,.35)); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+.dcfg-preview-head { font-size:12.5px; font-weight:600; }
+.dcfg-preview-text { max-height:200px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.55; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); }
+.dcfg-details { border-top:1px dashed var(--dsw-alias-border-l1, rgba(127,127,127,.22)); padding-top:8px; }
+.dcfg-details > summary { cursor:pointer; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12.5px; }
+.dcfg-details[open] > summary { margin-bottom:10px; }
+.dcfg-advbody { display:flex; flex-direction:column; gap:10px; }
+.dcfg-pre { margin:0; max-height:260px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.55; padding:10px 12px; border-radius:8px; background:var(--dsw-alias-bg-layer-2, rgba(127,127,127,.06)); }
+.dcfg-progress { width:100%; height:6px; accent-color:var(--dsw-alias-brand-primary, currentColor); }
+@media (max-width:560px) {
+  .dcfg-head { flex-direction:column; }
+  .dcfg-facts { grid-template-columns:1fr; }
+}
+`
+
+    var stylesInjected = false
+    /** Add this card's stylesheet once per document. Tests run without a DOM. */
+    function ensureStyles() {
+      if (stylesInjected || typeof document === 'undefined') return
+      stylesInjected = true
+      var style = document.createElement('style')
+      style.setAttribute('data-dsh-config-sync', '')
+      style.textContent = CSS
+      document.head.append(style)
+    }
 
     async function request(path, options) {
       // Every card request carries a deadline so a stalled fetch can never
@@ -158,56 +246,24 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function buttonStyle(primary) {
-      return {
-        appearance: 'none',
-        font: 'inherit',
-        fontSize: '13px',
-        lineHeight: 1.4,
-        cursor: 'pointer',
-        border: '1px solid ' + (primary ? 'transparent' : 'var(--dsw-alias-border-l2, rgba(127,127,127,.35))'),
-        borderRadius: '8px',
-        padding: '6px 12px',
-        background: primary
-          ? 'var(--dsw-alias-label-primary, currentColor)'
-          : 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.06))',
-        color: primary ? 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.05))' : 'inherit',
-      }
-    }
-
-    function field(label, value) {
-      return h(
-        'div',
-        { style: { minWidth: 0 } },
-        h(
-          'div',
-          {
-            style: {
-              color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,.8))',
-              fontSize: '12px',
-              marginBottom: '2px',
-            },
-          },
-          label,
-        ),
-        h(
-          'div',
-          {
-            title: value,
-            style: {
-              fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-              fontSize: '12px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            },
-          },
-          value || '—',
-        ),
-      )
+    /**
+     * The dry-run report is written for the CLI. The card already shows the
+     * remote/branch/profile facts and offers Apply itself, so drop the repeated
+     * identity block and the "run /sync-pull apply" instruction from the
+     * preview panel. The full text stays available under Status details.
+     */
+    function previewBody(text) {
+      var lines = String(text || '').split('\n')
+      while (lines.length > 0 && /^(Config sync pull(?: \(dry run\))?|remote:|branch:|profile:)/.test(lines[0].trim())) lines.shift()
+      return lines
+        .filter(function (line) { return !/^Nothing written\. Run \/sync-pull apply/.test(line.trim()) })
+        .join('\n')
+        .replace(/^\n+/, '')
+        .trim()
     }
 
     function Card() {
+      ensureStyles()
       var state = React.useState({
         loading: true,
         busy: false,
@@ -217,9 +273,11 @@ window.__ModuleLoader__.load({
         notice: '',
         result: '',
         message: '',
+        preview: null,
         draft: { remote: '', branch: 'main', profile: '' },
         configLoading: true,
         configReady: false,
+        configOpen: false,
         remoteHidden: false,
         saving: false,
         configError: null,
@@ -235,6 +293,7 @@ window.__ModuleLoader__.load({
             error: null,
             result: preserveResult ? current.result : '',
             notice: preserveResult ? current.notice : '',
+            preview: preserveResult ? current.preview : null,
           }
         })
         try {
@@ -261,9 +320,20 @@ window.__ModuleLoader__.load({
         setView(function (current) { return { ...current, configLoading: true, configReady: false, configError: null } })
         try {
           var data = await configRequest()
-          setView(function (current) { return { ...current, configLoading: false, configReady: true, remoteHidden: data.remoteEditable === false, draft: { remote: data.remoteEditable === false ? '' : data.remote, branch: data.branch, profile: data.profile } } })
+          setView(function (current) {
+            return {
+              ...current,
+              configLoading: false,
+              configReady: true,
+              // First run has no remote yet: open the settings a reader needs
+              // instead of leaving the fix one click away in a closed section.
+              configOpen: current.configOpen || data.remoteEditable === false || !String(data.remote || '').trim(),
+              remoteHidden: data.remoteEditable === false,
+              draft: { remote: data.remoteEditable === false ? '' : data.remote, branch: data.branch, profile: data.profile },
+            }
+          })
         } catch {
-          setView(function (current) { return { ...current, configLoading: false, configReady: false, configError: copy.saveError } })
+          setView(function (current) { return { ...current, configLoading: false, configReady: false, configOpen: true, configError: copy.saveError } })
         }
       }
 
@@ -275,16 +345,16 @@ window.__ModuleLoader__.load({
         [load],
       )
 
-      async function run(path, body, confirmText, action) {
-        if (confirmText && !window.confirm(confirmText)) return
+      async function run(path, body, action) {
         setView(function (current) {
-          return { ...current, busy: true, busyAction: action, error: null, notice: '', result: '' }
+          return { ...current, busy: true, busyAction: action, error: null, notice: '', result: '', preview: action === 'preview' ? null : current.preview }
         })
         try {
           var data = await request(path, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),            // Push/pull can take minutes on slow remotes or large profiles.
+            body: JSON.stringify(body),
+            // Push/pull can take minutes on slow remotes or large profiles.
             timeoutMs: 600000,
           })
           var text = data.text || ''
@@ -295,7 +365,8 @@ window.__ModuleLoader__.load({
           var installCommand = data.needsInstall === true
             ? 'dsh plugin --profile ' + ((data.profile || '').trim() || 'desktop') + ' install'
             : ''
-          var notice = data.upToDate === true || /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
+          var noChanges = data.upToDate === true || /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
+          var notice = noChanges
             ? copy.upToDate
             : action === 'probe'
               ? copy.testDone
@@ -303,9 +374,21 @@ window.__ModuleLoader__.load({
                 ? copy.pushDone
                 : action === 'apply'
                   ? (installCommand ? copy.installNext.replace('{command}', installCommand) : copy.applied)
-                  : copy.previewDone
+                  : copy.previewReady
           setView(function (current) {
-            return { ...current, busy: false, busyAction: '', result: text, notice: notice }
+            return {
+              ...current,
+              busy: false,
+              busyAction: '',
+              result: text,
+              notice: notice,
+              // A preview exposes Apply; a write discards the stale preview.
+              preview: action === 'preview'
+                ? (noChanges ? null : { text: previewBody(text) || text })
+                : action === 'push' || action === 'apply'
+                  ? null
+                  : current.preview,
+            }
           })
           await load(true, false)
         } catch (error) {
@@ -347,7 +430,7 @@ window.__ModuleLoader__.load({
             }
           }
           if (!verified) throw new Error(copy.saveError)
-          setView(function (current) { return { ...current, saving: false, remoteHidden: false, notice: copy.saved, data: { ...current.data, ...verified } } })
+          setView(function (current) { return { ...current, saving: false, remoteHidden: false, preview: null, notice: copy.saved, data: { ...current.data, ...verified } } })
           await load(true)
         } catch (error) {
           // Surface the server's own rejection code/message (E_CONFIG_INPUT,
@@ -358,6 +441,41 @@ window.__ModuleLoader__.load({
         }
       }
 
+      function busyLabel(action) {
+        if (action === 'push') return copy.pushBusy
+        if (action === 'probe') return copy.testBusy
+        if (action === 'preview' || action === 'apply') return copy.pullBusy
+        return copy.syncBusy
+      }
+
+      function fact(label, value) {
+        return h('div', { className: 'dcfg-fact' },
+          h('div', { className: 'dcfg-key' }, label),
+          h('div', { className: 'dcfg-val', title: value || '' }, value || '—'),
+        )
+      }
+
+      function configField(key) {
+        var label = copy[key]
+        return h('label', { key: key, className: 'dcfg-field' },
+          h('span', null, label),
+          h('input', {
+            type: 'text',
+            'aria-label': label,
+            className: 'dcfg-input',
+            value: view.draft[key],
+            maxLength: key === 'remote' ? 2048 : key === 'branch' ? 200 : 100,
+            autoComplete: 'off',
+            spellCheck: false,
+            disabled: disabled || view.configLoading || !view.configReady,
+            onChange: function (event) {
+              var value = event.target.value
+              setView(function (current) { return { ...current, draft: { ...current.draft, [key]: value } } })
+            },
+          }),
+        )
+      }
+
       var data = view.data || {}
       var disabled = view.busy || view.loading || view.saving
       // A stalled fetch must never lock the user out of Refresh: only a sync
@@ -365,264 +483,200 @@ window.__ModuleLoader__.load({
       var refreshDisabled = view.busy || view.saving
       var statusText = view.result || data.text || ''
       var error = view.error
-      var hint =
-        error && error.code === 'E_CONFIG' ? copy.noRemote : ''
-
+      var hint = error && error.code === 'E_CONFIG' ? copy.noRemote : ''
+      var verdict = view.busy
+        ? { kind: 'muted', text: busyLabel(view.busyAction) }
+        : view.loading && !data.text
+          ? { kind: 'muted', text: copy.loading }
+          : error && !data.text
+            ? { kind: 'warn', text: copy.statusUnavailable }
+            : data.upToDate === true
+              ? { kind: 'ok', text: copy.inSync }
+              : data.upToDate === false
+                ? { kind: 'warn', text: copy.differences }
+                : { kind: 'muted', text: copy.ready }
+      var chipText = view.busy
+        ? copy.syncBusy
+        : view.loading
+          ? '…'
+          : data.upToDate === true
+            ? copy.inSync
+            : data.upToDate === false
+              ? copy.changes
+              : copy.status
       return h(
         'div',
-        {
-          style: {
-            border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.32))',
-            borderRadius: '12px',
-            background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.04))',
-            padding: '14px 16px',
-            display: 'grid',
-            gap: '12px',
-          },
-        },
-        h(
-          'div',
-          { style: { display: 'flex', alignItems: 'flex-start', gap: '12px' } },
-          h(
-            'div',
-            { style: { flex: 1, minWidth: 0 } },
-            h('div', { style: { fontSize: '14px', fontWeight: 600 } }, copy.title),
-            h(
-              'div',
-              {
-                style: {
-                  color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,.8))',
-                  fontSize: '13px',
-                  lineHeight: 1.5,
-                },
-              },
-              copy.subtitle,
-            ),
+        { className: 'dcfg-root' },
+
+        h('div', { className: 'dcfg-head' },
+          h('div', { className: 'dcfg-headtext' },
+            h('h2', { className: 'dcfg-title' }, copy.title),
+            h('div', { className: 'dcfg-subtitle' }, copy.subtitle),
           ),
-          h(
-            'span',
-            {
-              style: {
-                border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.32))',
-                borderRadius: '999px',
-                padding: '2px 8px',
-                fontSize: '12px',
-                color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,.8))',
-                whiteSpace: 'nowrap',
-              },
-            },
-            view.loading ? '…' : view.busy ? copy.syncBusy : copy.status,
-          ),
+          h('span', { className: 'dcfg-chip' }, chipText),
         ),
-        h(
-          'div',
-          {
-            style: {
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)',
-              gap: '10px 16px',
-            },
-          },
-          field(copy.remote, data.remote),
-          field(copy.branch, data.branch),
-          field(copy.profile, data.profile),
-        ),
-        h('div', { style: { display: 'grid', gap: '8px' } },
-          h('div', { style: { fontSize: '12px', lineHeight: 1.5 } }, copy.configWarning),
-          ['remote', 'branch', 'profile'].map(function (key) {
-            return h('label', { key: key, style: { display: 'grid', gap: '4px' } },
-              copy[key],
-              h('input', {
-                type: 'text', 'aria-label': copy[key], value: view.draft[key],
-                maxLength: key === 'remote' ? 2048 : key === 'branch' ? 200 : 100,
-                autoComplete: 'off', spellCheck: false,
-                disabled: disabled || view.configLoading || !view.configReady,
-                onChange: function (event) {
-                  var value = event.target.value
-                  setView(function (current) { return { ...current, draft: { ...current.draft, [key]: value } } })
-                },
-                style: { width: '100%', boxSizing: 'border-box', padding: '6px 10px', color: 'inherit', background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.08))', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35))', borderRadius: '8px' },
-              }),
-            )
-          }),
-          view.remoteHidden ? h('div', { style: { fontSize: '12px' } }, copy.hiddenRemote) : null,
-          !view.configReady ? h('button', { type: 'button', disabled: disabled || view.configLoading, onClick: loadConfig, style: buttonStyle(false) }, copy.retryConfig) : null,
-          h('button', { type: 'button', disabled: disabled || view.configLoading || !view.configReady || (view.remoteHidden && !view.draft.remote.trim()), onClick: saveConfig, style: buttonStyle(false) }, view.saving ? copy.saving : copy.save),
-          view.configError ? h('div', { role: 'alert' }, view.configError) : null,
-        ),
+
+        view.notice
+          ? h('div', { role: 'status', className: 'dcfg-notice dcfg-notice-ok' }, view.notice)
+          : null,
+
         error
-          ? h(
-              'div',
-              {
-                style: {
-                  border: '1px solid var(--dsw-alias-border-warning, rgba(190,120,20,.45))',
-                  borderRadius: '8px',
-                  padding: '8px 10px',
-                  fontSize: '13px',
-                  lineHeight: 1.5,
-                },
-              },
+          ? h('div', { role: 'alert', className: 'dcfg-notice dcfg-notice-error' },
               h('strong', null, copy.error + ': '),
               (error.code ? error.code + ' — ' : '') + error.message,
-              hint ? h('div', { style: { marginTop: '4px' } }, hint) : null,
+              hint ? h('div', { className: 'dcfg-hint' }, hint) : null,
             )
           : null,
-        h(
-          'div',
-          { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' } },
-          h(
-            'button',
-            {
+
+        h('section', { className: 'dcfg-card' },
+          h('div', { className: 'dcfg-verdict dcfg-verdict-' + verdict.kind },
+            h('span', { className: 'dcfg-dot', 'aria-hidden': 'true' }),
+            h('span', null, verdict.text),
+          ),
+          h('div', { className: 'dcfg-facts' },
+            fact(copy.remote, data.remote),
+            fact(copy.branch, data.branch),
+            fact(copy.profile, data.profile),
+          ),
+          h('div', { className: 'dcfg-actions' },
+            h('button', {
               type: 'button',
+              className: 'dcfg-btn',
               disabled: refreshDisabled,
-              onClick: function () {
-                load(false)
-              },
-              style: buttonStyle(false),
-            },
-            copy.refresh,
-          ),
-          h(
-            'button',
-            {
+              onClick: function () { load(false) },
+            }, copy.refresh),
+            h('button', {
               type: 'button',
+              className: 'dcfg-btn',
               disabled: disabled,
-              onClick: function () {
-                run(ROUTES.probe, {}, null, 'probe')
-              },
-              style: buttonStyle(false),
-            },
-            view.busyAction === 'probe' ? copy.testBusy : copy.test,
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              disabled: disabled,
-              onClick: function () {
-                run(ROUTES.pull, { apply: false }, null, 'preview')
-              },
-              style: buttonStyle(false),
-            },
-            view.busyAction === 'preview' ? copy.pullBusy : copy.preview,
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              disabled: disabled,
-              onClick: function () {
-                run(ROUTES.pull, { apply: true }, copy.applyConfirm, 'apply')
-              },
-              style: buttonStyle(false),
-            },
-            view.busyAction === 'apply' ? copy.pullBusy : copy.apply,
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              disabled: disabled,
-              onClick: function () {
-                run(ROUTES.push, { message: view.message }, null, 'push')
-              },
-              style: buttonStyle(true),
-            },
-            view.busyAction === 'push' ? copy.pushBusy : copy.push,
-          ),
-          h(
-            'input',
-            {
-              type: 'text',
-              value: view.message,
-              maxLength: 500,
-              placeholder: copy.messageHint,
-              'aria-label': copy.message,
-              disabled: disabled,
-              onChange: function (event) {
-                var value = event.target.value
-                setView(function (current) {
-                  return { ...current, message: value }
-                })
-              },
-              style: {
-                flex: '1 1 200px',
-                minWidth: '160px',
-                font: 'inherit',
-                fontSize: '13px',
-                lineHeight: 1.4,
-                padding: '6px 10px',
-                color: 'inherit',
-                background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.08))',
-                border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35))',
-                borderRadius: '8px',
-              },
-            },
+              onClick: function () { run(ROUTES.probe, {}, 'probe') },
+            }, view.busyAction === 'probe' ? copy.testBusy : copy.test),
           ),
         ),
+
+        h('section', { className: 'dcfg-card' },
+          h('div', { className: 'dcfg-cardtitle' }, copy.syncTitle),
+          h('div', { className: 'dcfg-syncgrid' },
+
+            h('div', { className: 'dcfg-section' },
+              h('div', { className: 'dcfg-sectiontitle' }, copy.pullTitle),
+              h('div', { className: 'dcfg-hint' }, copy.pullHint),
+              h('div', { className: 'dcfg-actions' },
+                h('button', {
+                  type: 'button',
+                  className: 'dcfg-btn',
+                  disabled: disabled,
+                  onClick: function () { run(ROUTES.pull, { apply: false }, 'preview') },
+                }, view.busyAction === 'preview' ? copy.pullBusy : copy.preview),
+              ),
+              view.preview
+                ? h('div', { className: 'dcfg-preview' },
+                    h('div', { className: 'dcfg-preview-head' }, copy.previewTitle),
+                    h('div', { className: 'dcfg-preview-text' }, view.preview.text),
+                    h('div', { className: 'dcfg-hint' }, copy.applyHint),
+                    h('div', { className: 'dcfg-actions' },
+                      h('button', {
+                        type: 'button',
+                        className: 'dcfg-btn dcfg-btn-primary',
+                        disabled: disabled,
+                        onClick: function () { run(ROUTES.pull, { apply: true }, 'apply') },
+                      }, view.busyAction === 'apply' ? copy.pullBusy : copy.apply),
+                      h('button', {
+                        type: 'button',
+                        className: 'dcfg-btn',
+                        disabled: disabled,
+                        onClick: function () {
+                          setView(function (current) { return { ...current, preview: null, notice: '', error: null } })
+                        },
+                      }, copy.cancel),
+                    ),
+                  )
+                : null,
+            ),
+
+            h('div', { className: 'dcfg-section' },
+              h('div', { className: 'dcfg-sectiontitle' }, copy.pushTitle),
+              h('div', { className: 'dcfg-hint' }, copy.pushHint),
+              h('div', { className: 'dcfg-actions' },
+                h('button', {
+                  type: 'button',
+                  className: 'dcfg-btn dcfg-btn-primary',
+                  disabled: disabled,
+                  onClick: function () { run(ROUTES.push, { message: view.message }, 'push') },
+                }, view.busyAction === 'push' ? copy.pushBusy : copy.push),
+              ),
+              h('details', { className: 'dcfg-details' },
+                h('summary', null, copy.message),
+                h('input', {
+                  type: 'text',
+                  'aria-label': copy.message,
+                  className: 'dcfg-input',
+                  value: view.message,
+                  maxLength: 500,
+                  placeholder: copy.messageHint,
+                  disabled: disabled,
+                  onChange: function (event) {
+                    var value = event.target.value
+                    setView(function (current) { return { ...current, message: value } })
+                  },
+                }),
+              ),
+            ),
+
+          ),
+        ),
+
         view.busy
           ? h('progress', {
-              'aria-label': view.busyAction === 'push' ? copy.pushBusy : copy.pullBusy,
-              style: { width: '100%', height: '6px', accentColor: 'var(--dsw-alias-label-primary, currentColor)' },
+              'aria-label': busyLabel(view.busyAction),
+              className: 'dcfg-progress',
             })
           : null,
-        view.notice
-          ? h(
-              'div',
-              {
-                role: 'status',
-                style: {
-                  border: '1px solid var(--dsw-alias-border-success, rgba(40,160,90,.45))',
-                  borderRadius: '8px',
-                  background: 'rgba(40,160,90,.08)',
-                  padding: '8px 10px',
-                  fontSize: '13px',
-                  lineHeight: 1.5,
-                  fontWeight: 600,
-                },
-              },
-              view.notice,
-            )
-          : null,
-        h(
-          'div',
-          null,
-          h(
-            'div',
-            {
-              style: {
-                color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,.8))',
-                fontSize: '12px',
-                marginBottom: '4px',
-              },
-            },
-            copy.status,
+
+        h('details', {
+          className: 'dcfg-details',
+          open: view.configOpen,
+          onToggle: function (event) {
+            var open = Boolean(event && event.target && event.target.open)
+            setView(function (current) { return { ...current, configOpen: open } })
+          },
+        },
+          h('summary', null, copy.advanced),
+          h('div', { className: 'dcfg-advbody' },
+            h('div', { className: 'dcfg-hint' }, copy.configWarning),
+            configField('remote'),
+            configField('branch'),
+            configField('profile'),
+            view.remoteHidden ? h('div', { className: 'dcfg-hint dcfg-warn' }, copy.hiddenRemote) : null,
+            h('div', { className: 'dcfg-actions' },
+              !view.configReady
+                ? h('button', {
+                    type: 'button',
+                    className: 'dcfg-btn',
+                    disabled: disabled || view.configLoading,
+                    onClick: loadConfig,
+                  }, copy.retryConfig)
+                : null,
+              h('button', {
+                type: 'button',
+                className: 'dcfg-btn',
+                disabled: disabled || view.configLoading || !view.configReady || (view.remoteHidden && !view.draft.remote.trim()),
+                onClick: saveConfig,
+              }, view.saving ? copy.saving : copy.save),
+            ),
+            view.configError ? h('div', { role: 'alert', className: 'dcfg-notice dcfg-notice-error' }, view.configError) : null,
           ),
-          h(
-            'pre',
-            {
-              style: {
-                margin: 0,
-                maxHeight: '260px',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-                fontSize: '12px',
-                lineHeight: 1.55,
-                padding: '10px 12px',
-                borderRadius: '8px',
-                background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.08))',
-              },
-            },
-            statusText || (view.loading ? copy.loading : copy.empty),
-          ),
+        ),
+
+        h('details', { className: 'dcfg-details' },
+          h('summary', null, copy.output),
+          h('pre', { className: 'dcfg-pre' }, statusText || (view.loading ? copy.loading : copy.empty)),
         ),
       )
     }
 
     function SettingsPage() {
-      return h('div', { style: { maxWidth: '760px' } }, h(Card))
+      return h('div', { style: { width: '100%', maxWidth: '780px' } }, h(Card))
     }
 
     function apply(ctx) {

@@ -188,15 +188,15 @@ dsh plugin --profile desktop add dsh-config-git-sync
 - **设置 → 配置同步**：完整的状态与操作卡片，适合日常使用。
 - 侧边栏 **插件** → `dsh-config-git-sync` 的 bundle 页面：同一张卡片，方便从插件详情进入。
 
-卡片会显示远端、分支、profile 和当前状态。新机器无需先手写 YAML：在卡片的配置区填写私有仓库地址、分支（默认 `main`）和 profile（留空自动检测），点击 **保存配置**，等待回读确认后再刷新状态或预览 Pull。仓库地址不能包含密码或 Token；请预先配置 Git 凭据管理器或 SSH。
+卡片会显示远端、分支、profile 和当前状态。新机器无需先手写 YAML：展开卡片的 **连接设置**，填写私有仓库地址、分支（默认 `main`）和 profile（留空自动检测），点击 **保存配置**，等待回读确认。仓库地址不能包含密码或 Token；请预先配置 Git 凭据管理器或 SSH。连接设置和完整状态文本默认折叠，首次使用或配置读取失败时会自动展开。
 
 **保存位置**：UI 通过 DSH 配置编辑器保存到当前运行 profile 的配置覆盖层，保留其他配置字段。这个文件也属于同步范围，但本机 `- id: config-sync` 那一行被当作机器本地数据：Push 时剔除、Pull 应用后并回，所以保存的仓库地址不会因为 Pull 被清空。Pull 输出里会表示 `preserved: config-sync row (this machine)`，卡片也会在应用后提示。若已有 home/命令行配置覆盖当前字段，编辑器会拒绝保存，界面会报告失败，不会修改高优先级配置。
 
 - 卡片显示远端、分支、profile 和当前状态；**刷新** 只读，不会写盘。
 - **测试连接** 会向远端写入并随后删除一个 `.config-sync-probe` 标记文件，验证仓库可读可写，
   不触碰任何同步内容；测试通过后输出 `Connection test passed`。
-- **预览 Pull** 等价于 `/sync-pull`，只显示差异。
-- **应用 Pull** 会先确认，再写快照并覆盖本地受管文件。本机 `config-sync` 行会被保留。
+- **预览 Pull** 等价于 `/sync-pull`，只显示差异；预览会直接展开在卡片里，确认后才出现 **应用 Pull**（或 **取消**）。
+- **应用 Pull** 先写快照，再覆盖本地受管文件。因为只有在预览后才出现，不再弹单独的确认框；本机 `config-sync` 行会被保留。
 - 插件依赖默认自动安装（`reconcile: install`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
   会在 profile 目录里运行 `pnpm install`（优先用 DSH 自带的 node+pnpm 运行时，其次 PATH 上的 pnpm/corepack/npm 兜底），
   成功后输出 `packages: installed with <工具>`。
