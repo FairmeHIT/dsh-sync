@@ -26,7 +26,7 @@
 | 从 Git blob 读取，push 校验暂存和提交字节 | 换行、`.gitattributes`、`.gitignore` 不应改变受管文件内容 |
 | pull 只删除本机同步过的文件 | 首次 pull 不误删本地已有的 `cordis.patch.yml` 等未受管文件 |
 | 同步副本剔除本机 `config-sync` 行 | 仓库地址属于机器私有；该行不进仓库，也就不可能从仓库回来覆盖本机配置 |
-| 默认 `reconcile: none` | 远端 `package.json` 不应在默认配置下触发安装脚本 |
+| 默认 `reconcile: install` | Pull 后自动安装依赖，新机器开箱即用；不信任仓库时可设回 `none` |
 | host 工具 + Web UI | 命令/工具在 desktop/headless 都能用；Web 端提供设置页和插件页卡片 |
 | state + 跨进程锁 + 快照 | 多机器/多会话并发时避免静默覆盖和半写 |
 
@@ -160,7 +160,7 @@ dsh plugin --profile desktop add dsh-config-git-sync
 | `dshHome` | 空 | Harness home；留空用 `$DSH_HOME`，再退到 `~/.dsh` |
 | `includeLockfile` | `false` | 是否同步 `pnpm-lock.yaml` |
 | `includeWorkspace` | `false` | 是否同步 `pnpm-workspace.yaml`（跨机器复现 `allowBuilds` 时开启） |
-| `reconcile` | `none` | pull 应用后是否装依赖。默认只写文件；设为 `install` 会执行远端 `package.json` 选择的包安装脚本，属于信任远端仓库的操作 |
+| `reconcile` | `install` | pull 应用后是否装依赖。默认自动安装（`install`），新机器 Pull 后依赖即可用；设为 `none` 只写文件并提示手动安装命令。`install` 会执行远端 `package.json` 选择的包安装脚本，属于信任远端仓库的操作 |
 | `snapshot` | `true` | pull 应用前写本地快照 |
 | `snapshotKeep` | `20` | 每个 profile 保留的快照数量；`0` 表示全部保留 |
 | `secretScan` | `warn` | 检测到疑似内联凭据时警告；`off` 关闭 |
@@ -195,9 +195,10 @@ dsh plugin --profile desktop add dsh-config-git-sync
 - 卡片显示远端、分支、profile 和当前状态；**刷新** 只读，不会写盘。
 - **预览 Pull** 等价于 `/sync-pull`，只显示差异。
 - **应用 Pull** 会先确认，再写快照并覆盖本地受管文件。本机 `config-sync` 行会被保留。
-- 插件依赖不会自动安装（`reconcile: none`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
-  输出会明确写 `packages: manifest changed but dependencies were not installed (reconcile: none)` 和
-  `next: dsh plugin --profile <profile> install`，卡片顶部也会提示这条命令；执行后再重启。
+- 插件依赖默认自动安装（`reconcile: install`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
+  会在 profile 目录里运行 `pnpm install`（或 corepack/npm 兜底），成功后输出 `packages: installed with <工具>`。
+  设为 `none` 时只写文件，输出会明确写 `packages: manifest changed but dependencies were not installed`
+  和 `next: dsh plugin --profile <profile> install`；执行后再重启。
 - **Push** 可填写提交信息；UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
 - 卡片不可见时，先确认插件已安装并重启，再检查 `~/.dsh/cordis.patch.yml` 中的 `config.remote`；
   接口地址是 `/api/config-sync/status`。
@@ -233,8 +234,9 @@ dsh plugin --profile desktop add dsh-config-git-sync
 B 机的 `config-sync` 行在 `apply` 后会保留：A 机的版本里没有这一行，B 机自己的地址不会被换掉。
 home 级配置仍然是更稳妥的选择。
 
-默认 `reconcile: none`，`pull apply` 只写文件，不会自动安装插件。这时输出和卡片都会点名下一步：
-`dsh plugin --profile <profile> install`。也可以在确认仓库可信后把 `reconcile` 设为 `install` 自动安装。
+默认 `reconcile: install`，`pull apply` 写完文件后会在 profile 目录自动运行包管理器安装依赖，
+新机器 Pull 完重启即可用。也可以设为 `none` 只写文件，输出和卡片都会点名下一步：
+`dsh plugin --profile <profile> install`。
 
 ### 让新机器的 DSH 代你安装（可选）
 
@@ -305,8 +307,8 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 - **不读凭据**：`.credentials.yaml` 不在允许列表内，永远不会被打开。
 - **缓存隔离**：Git 工作副本在 `$DSH_HOME/config-sync/work/<哈希>`，按远端和分支隔离，并用
   `sync.lock` 串行化，避免并发操作互相覆盖。
-- **显式安装**：`reconcile` 默认 `none`。只有明确设为 `install` 时才会执行包管理器，因此远端
-  `package.json` 不会在默认配置下触发安装脚本。
+- **默认安装**：`reconcile` 默认 `install`，Pull 后自动运行包管理器，让同步的插件在新机器上立即可用。
+  不信任仓库时设为 `none`，此时不会执行任何安装脚本。
 - **秘密扫描**：push 前对明显的内联 key / token 做启发式警告，但**不能保证**发现所有秘密；
   仓库必须保持私有，优先使用环境变量。
 - **提交卫生**：提交使用配置的身份，禁用 GPG 签名和钩子，不会因为全局 Git 设置而卡住。
@@ -322,7 +324,7 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
   正常工作并把它恢复；push 会拒绝缺少 `package.json` 的 profile。
 - `package.json`、锁文件或 workspace 文件变化且 `reconcile=install` 时，优先用 `pnpm install`，
   其次 `corepack pnpm install`，最后 `npm install --no-audit --no-fund`；真正的安装失败会停止并报告，
-  不会再用另一个包管理器覆盖。默认 `reconcile=none`，不会自动执行安装脚本。
+  不会再用另一个包管理器覆盖。
 - `link:` / `file:` / `workspace:` 依赖无法跨机器还原，会在输出里标记为需要手动安装。
 - 分支不存在时会创建新的根提交，只包含当前 profile 的受管文件，不会把其它分支历史带进来；远端分支
   被删除后再次 push 也会重建根提交，不会把旧 tip 推回去。
@@ -344,8 +346,8 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 - `cordis.patch.yml` 可能包含模型供应商的内联密钥；秘密扫描只是启发式，请自行确认后再 push。
 - 只保留本机 `- id: config-sync` 这一行；如果你把其它机器私有设置（例如本机路径、本机端口）写进
   同一个 `cordis.patch.yml` 的别的行，它们仍会被同步、也会被 Pull 覆盖。这类设置请放在 home 层。
-- `reconcile` 默认 `none`；如果改为 `install`，远端 `package.json`（以及可选的 workspace 文件）可以选择
-  要安装的包及其安装脚本，因此只应对可信仓库开启。
+- `reconcile` 默认 `install`；远端 `package.json`（以及可选的 workspace 文件）可以选择
+  要安装的包及其安装脚本，因此只应对可信仓库保持默认。不信任时设为 `none`。
 - 本插件按 Git 对象的精确字节校验。如果另一台机器用 `core.autocrlf=true` 提交并改写了行尾，远端会报
   `E_MANIFEST`；请用 `core.autocrlf=false` 重新提交受管文件。插件自己的缓存始终关闭行尾转换。
 

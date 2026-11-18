@@ -27,7 +27,7 @@ export const Config = Schema.object({
     .default(false)
     .description('Also sync pnpm-workspace.yaml, including allowBuilds and release-age settings.'),
   reconcile: Schema.union([Schema.const('none'), Schema.const('install')])
-    .default('none')
+    .default('install')
     .description(
       'After a pull, run the package manager in the profile (install) or leave files only (none). install executes package scripts selected by the remote manifest.',
     ),
@@ -54,7 +54,7 @@ const DEFAULTS = {
   dshHome: '',
   includeLockfile: false,
   includeWorkspace: false,
-  reconcile: 'none',
+  reconcile: 'install',
   snapshot: true,
   snapshotKeep: 20,
   secretScan: 'warn',
@@ -79,7 +79,7 @@ export function normalizeConfig(input = {}) {
   out.gitBin = String(out.gitBin || 'git').trim() || 'git'
   out.authorName = String(out.authorName || '').trim() || DEFAULTS.authorName
   out.authorEmail = String(out.authorEmail || '').trim() || DEFAULTS.authorEmail
-  out.reconcile = out.reconcile === 'install' ? 'install' : 'none'
+  out.reconcile = out.reconcile === 'none' ? 'none' : 'install'
   out.secretScan = out.secretScan === 'off' ? 'off' : 'warn'
   out.snapshot = out.snapshot !== false
   out.includeLockfile = out.includeLockfile === true

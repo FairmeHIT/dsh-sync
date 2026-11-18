@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-11-18
+
+### Changed
+
+- **`reconcile` now defaults to `install`.** A pull that changes `package.json`, a lockfile or the
+  plugin list runs the package manager in the profile directory (`pnpm install`, then
+  `corepack pnpm install`, then `npm install --no-audit --no-fund`), so synced plugins work on a
+  new machine after a restart instead of failing with `cannot resolve profile bundle`. For a
+  repository you do not trust, set `reconcile: none` to keep the old write-files-only behavior; the
+  report then names `dsh plugin --profile <profile> install` as the next step. An install failure
+  stops and reports the output instead of falling through to another package manager.
+
 ## [0.6.0] - 2026-11-18
 
 ### Fixed

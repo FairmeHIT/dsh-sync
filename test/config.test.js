@@ -18,7 +18,7 @@ const DEFAULTS = {
   dshHome: '',
   includeLockfile: false,
   includeWorkspace: false,
-  reconcile: 'none',
+  reconcile: 'install',
   snapshot: true,
   snapshotKeep: 20,
   secretScan: 'warn',
@@ -36,7 +36,7 @@ describe('Config schema', () => {
     assert.equal(value.dshHome, '')
     assert.equal(value.includeLockfile, false)
     assert.equal(value.includeWorkspace, false)
-    assert.equal(value.reconcile, 'none')
+    assert.equal(value.reconcile, 'install')
     assert.equal(value.snapshot, true)
     assert.equal(value.snapshotKeep, 20)
     assert.equal(value.secretScan, 'warn')
@@ -94,7 +94,8 @@ describe('normalizeConfig', () => {
   test('keeps only the known reconcile and secret-scan modes', () => {
     assert.equal(normalizeConfig({ reconcile: 'none' }).reconcile, 'none')
     assert.equal(normalizeConfig({ reconcile: 'install' }).reconcile, 'install')
-    assert.equal(normalizeConfig({ reconcile: 'something' }).reconcile, 'none')
+    assert.equal(normalizeConfig({}).reconcile, 'install')
+    assert.equal(normalizeConfig({ reconcile: 'something' }).reconcile, 'install')
     assert.equal(normalizeConfig({ secretScan: 'off' }).secretScan, 'off')
     assert.equal(normalizeConfig({ secretScan: 'block' }).secretScan, 'warn')
   })

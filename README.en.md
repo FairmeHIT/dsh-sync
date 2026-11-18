@@ -29,7 +29,7 @@ Our trade-offs:
 | Refuse a conflicting push instead of auto-merging | Config files are whole-document semantics; make the user pull or explicitly force rather than silently overwrite another machine |
 | Read Git blobs; verify staged and committed bytes | Line endings, `.gitattributes` and `.gitignore` must not change managed content |
 | Pull deletes only files this machine previously synced | A first pull must not remove a local `cordis.patch.yml` or other unmanaged files |
-| `reconcile: none` by default | A remote `package.json` must not trigger install scripts by default |
+| `reconcile: install` by default | Pulled dependencies are installed automatically; set `none` for an untrusted repository |
 | The synced copy drops this machine's `config-sync` row | The repository URL is machine-local; the row never reaches the remote, so it can never be written back over local settings |
 | Host tools + Web UI | Commands/tools work in desktop and headless; the web shell gets a Settings page and plugin-page card |
 | State + cross-process lock + snapshots | Avoid silent overwrites and half-written files across machines/sessions |
@@ -180,7 +180,7 @@ has higher priority and is untouched by profile-level sync.
 | `dshHome` | empty | Harness home; falls back to `$DSH_HOME`, then `~/.dsh` |
 | `includeLockfile` | `false` | Also sync `pnpm-lock.yaml` |
 | `includeWorkspace` | `false` | Also sync `pnpm-workspace.yaml` (needed to reproduce `allowBuilds` across machines) |
-| `reconcile` | `none` | Install packages after a pull. The default only writes files; `install` runs package scripts selected by the remote `package.json`, which trusts the repository |
+| `reconcile` | `install` | Install packages after a pull. The default installs automatically so pulled plugins work on a new machine; `none` only writes files and prints the manual install command. `install` runs package scripts selected by the remote `package.json`, which trusts the repository |
 | `snapshot` | `true` | Write a pre-apply snapshot |
 | `snapshotKeep` | `20` | Snapshots to keep per profile; `0` keeps all |
 | `secretScan` | `warn` | Warn about likely inline credentials; `off` disables |
@@ -217,10 +217,11 @@ The card shows the remote, branch, profile and current status. On a new machine,
 - **Preview pull** is the same as `/sync-pull`; it writes nothing.
 - **Apply pull** asks for confirmation, snapshots, then overwrites managed local files. This
   machine's `config-sync` row is preserved.
-- Apply pull does not install dependencies (`reconcile: none`). When the pull changed `package.json`,
-  a lockfile or the plugin list, the output states
-  `packages: manifest changed but dependencies were not installed (reconcile: none)` and
-  `next: dsh plugin --profile <profile> install`; the card shows the same command. Restart after it.
+- Apply pull installs dependencies by default (`reconcile: install`). When the pull changed `package.json`,
+  a lockfile or the plugin list, the plugin runs `pnpm install` (or corepack/npm fallbacks) in the profile
+  directory and reports `packages: installed with <tool>`. With `reconcile: none` the output instead states
+  `packages: manifest changed but dependencies were not installed` and
+  `next: dsh plugin --profile <profile> install`. Restart after installing.
 - **Push** accepts a commit message. The UI does not expose force; use `/sync-push --force` when
   needed.
 - If the card is missing, confirm the plugin is installed and DSH restarted, then check
@@ -255,9 +256,9 @@ The card shows the remote, branch, profile and current status. On a new machine,
 Machine B's `config-sync` row survives `apply`: machine A's copy does not contain it, and the local
 row is merged back. The home layer is still the safer place to keep it.
 
-`reconcile` defaults to `none`, so `pull apply` only writes files and does not install plugins. Both
-the output and the card then name the next step: `dsh plugin --profile <profile> install`. You can
-also set `reconcile` to `install` after deciding the repository is trusted.
+`reconcile` defaults to `install`, so `pull apply` writes files and then runs the package manager in
+the profile — a new machine is ready after a restart. With `none` the output and the card name the
+next step instead: `dsh plugin --profile <profile> install`.
 
 ### Let the new machine's DSH do the install (optional)
 
@@ -343,9 +344,8 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 - **Isolated cache**: the Git work tree lives in `$DSH_HOME/config-sync/work/<hash>`, keyed by
   remote and branch, and `sync.lock` serializes operations so concurrent syncs cannot clobber each
   other.
-- **Explicit installs**: `reconcile` defaults to `none`. Package managers run only when it is set to
-  `install`, so a remote `package.json` cannot trigger install scripts under the default
-  configuration.
+- **Default installs**: `reconcile` defaults to `install`, so pulled plugins work on a new machine
+  without a manual step. Set it to `none` for a repository you do not trust; no installer runs then.
 - **Secret heuristic**: push warns about obvious inline keys and tokens, but this is **not a
   guarantee**. Keep the repository private and prefer environment variables.
 - **Commit hygiene**: commits use the configured identity with GPG signing and hooks disabled, so
@@ -365,7 +365,7 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 - When `package.json`, a lockfile or the workspace file changes and `reconcile=install`, the plugin
   tries `pnpm install`, then `corepack pnpm install`, then
   `npm install --no-audit --no-fund`. A real install failure stops there instead of letting a
-  different package manager overwrite the result. The default `reconcile=none` runs no installer.
+  different package manager overwrite the result.
 - `link:` / `file:` / `workspace:` dependencies cannot be restored across machines and are
   reported as manual work.
 - A configured branch that does not exist on the remote is created as a new root commit containing
@@ -394,9 +394,9 @@ decides the result. Git history keeps every step, but the conflict itself needs 
   what you want.
 - `cordis.patch.yml` can legitimately contain inline provider credentials. The secret scan is a
   heuristic; review the diff before pushing.
-- `reconcile` defaults to `none`. Setting it to `install` lets the remote `package.json` (and the
-  optional workspace file) choose packages and install scripts, so enable it only for a trusted
-  repository.
+- `reconcile` defaults to `install`. The remote `package.json` (and the optional workspace file)
+  chooses packages and install scripts, so keep the default only for a trusted repository; set `none`
+  otherwise.
 - The plugin verifies exact Git bytes. If another machine commits with `core.autocrlf=true` and
   rewrites line endings, the remote reports `E_MANIFEST`; re-commit the managed files with
   `core.autocrlf=false`. The plugin's own cache always disables line-ending conversion.

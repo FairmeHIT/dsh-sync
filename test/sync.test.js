@@ -46,8 +46,20 @@ describe('reconcilePackages', () => {
     assert.equal(result.skipped, true)
   })
 
-  test('defaults to none so a pulled manifest cannot run package scripts', () => {
-    assert.equal(normalizeConfig({}).reconcile, 'none')
+  test('defaults to install so pulled plugins are usable on a new machine', () => {
+    assert.equal(normalizeConfig({}).reconcile, 'install')
+  })
+
+  test('runs the package manager when reconcile is install (missing binary is not a crash)', async () => {
+    const result = await reconcilePackages({
+      config: { reconcile: 'install' },
+      profileDir: 'C:\\\\definitely-missing-profile-dir',
+    })
+    // Without pnpm/corepack/npm on PATH the result is a clean failure listing
+    // every manager as missing — never a throw, never a false success.
+    assert.equal(result.ok, false)
+    assert.match(result.output, /pnpm:/)
+    assert.match(result.output, /npm:/)
   })
 })
 

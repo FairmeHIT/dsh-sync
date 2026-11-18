@@ -45,6 +45,7 @@ function profileConfig(root, home, profile, extra = {}) {
     remote: join(root, 'remote.git'),
     dshHome: home,
     profile,
+    // The e2e suite predates reconcile: install; keep its pulls offline.
     reconcile: 'none',
     ...extra,
   })
