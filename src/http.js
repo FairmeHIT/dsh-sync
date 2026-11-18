@@ -11,6 +11,7 @@ export const HTTP_ROUTES = Object.freeze({
   push: '/api/config-sync/push',
   pull: '/api/config-sync/pull',
   config: '/api/config-sync/config',
+  probe: '/api/config-sync/probe',
 })
 
 class BadRequest extends Error {
@@ -40,6 +41,12 @@ function identity(config) {
 }
 
 function failure(config, error, status = 200) {
+  // A held lock means another sync is already running: report it as 409 with
+  // the structured flag the card needs, so the UI can say "busy" instead of
+  // surfacing a generic error (pattern from dsh-plugin-account-sync).
+  if (error?.code === 'E_BUSY') {
+    return json({ ok: false, ...identity(config), code: 'E_BUSY', message: error.message, busy: true }, 409)
+  }
   return json(
     {
       ok: false,
@@ -113,9 +120,18 @@ export function createHttpRoutes(config, operations, editor) {
   }
 
   async function statusRoute() {
+    // Remount recovery: report an in-flight sync and the last outcome so a
+    // freshly mounted card restores the real state instead of showing "idle"
+    // over a running push (syncup's cached=1 equivalent).
+    const busy = operations.isBusy ? await operations.isBusy() : false
+    if (busy) {
+      const activity = operations.readActivity ? await operations.readActivity() : null
+      return json({ ok: true, ...identity(config), busy: true, activity, text: '' })
+    }
     try {
       const text = await operations.status(config)
-      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text) })
+      const activity = operations.readActivity ? await operations.readActivity() : null
+      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text), activity })
     } catch (error) {
       return failure(config, error)
     }
@@ -156,12 +172,27 @@ export function createHttpRoutes(config, operations, editor) {
     }
   }
 
+  async function probeRoute() {
+    try {
+      const text = await operations.probe(config)
+      return json({ ok: true, ...identity(config), text })
+    } catch (error) {
+      return failure(config, error)
+    }
+  }
+
   return [
     {
       path: HTTP_ROUTES.status,
       methods: ['GET'],
       requestBody: 'buffered',
       fetch: statusRoute,
+    },
+    {
+      path: HTTP_ROUTES.probe,
+      methods: ['POST'],
+      requestBody: 'buffered',
+      fetch: probeRoute,
     },
     {
       path: HTTP_ROUTES.push,

@@ -15,6 +15,7 @@ window.__ModuleLoader__.load({
       push: '/api/config-sync/push',
       pull: '/api/config-sync/pull',
       config: '/api/config-sync/config',
+      probe: '/api/config-sync/probe',
     }
 
     var zh =
@@ -28,6 +29,9 @@ window.__ModuleLoader__.load({
           branch: '分支',
           profile: 'Profile',
           refresh: '刷新',
+          test: '测试连接',
+          testBusy: '测试中…',
+          testDone: '连接测试通过：远端可读写。',
           preview: '预览 Pull',
           apply: '应用 Pull',
           push: 'Push',
@@ -53,6 +57,7 @@ window.__ModuleLoader__.load({
           applied: '已应用远端配置。建议重启 DSH。',
           installNext: '已应用远端配置。请先运行“{command}”，然后重启 DSH。',
           requestTimeout: '请求超时，请稍后重试。',
+          busyElsewhere: '另一台同步正在进行中（可能来自本机或其他窗口），请稍后再试。',
           error: '操作失败',
         }
       : {
@@ -62,6 +67,9 @@ window.__ModuleLoader__.load({
           branch: 'Branch',
           profile: 'Profile',
           refresh: 'Refresh',
+          test: 'Test connection',
+          testBusy: 'Testing…',
+          testDone: 'Connection test passed: the remote is readable and writable.',
           preview: 'Preview pull',
           apply: 'Apply pull',
           push: 'Push',
@@ -88,6 +96,7 @@ window.__ModuleLoader__.load({
           applied: 'Remote configuration applied. Restart DSH when convenient.',
           installNext: 'Remote configuration applied. Run "{command}", then restart DSH.',
           requestTimeout: 'The request timed out. Please retry.',
+          busyElsewhere: 'Another sync is already running (possibly from this machine or another window). Retry shortly.',
           error: 'Request failed',
         }
 
@@ -218,7 +227,7 @@ window.__ModuleLoader__.load({
       var view = state[0]
       var setView = state[1]
 
-      var load = React.useCallback(async function (preserveResult) {
+      var load = React.useCallback(async function (preserveResult, restoreBusy) {
         setView(function (current) {
           return {
             ...current,
@@ -231,11 +240,19 @@ window.__ModuleLoader__.load({
         try {
           var data = await request(ROUTES.status)
           setView(function (current) {
-            return { ...current, loading: false, data: data, error: null }
+            // Remount recovery: the host reports an in-flight sync; show the
+            // busy state instead of an idle card over a running operation.
+            if (data.busy === true) {
+              return { ...current, loading: false, busy: true, busyAction: data.activity && data.activity.action ? data.activity.action : 'sync', data: { ...current.data, ...data }, error: null }
+            }
+            if (restoreBusy !== false && data.activity && data.activity.finishedAt && data.activity.text) {
+              return { ...current, loading: false, busy: false, busyAction: '', data: data, error: null, result: current.result || data.activity.text }
+            }
+            return { ...current, loading: false, busy: false, busyAction: '', data: data, error: null }
           })
         } catch (error) {
           setView(function (current) {
-            return { ...current, loading: false, error: error }
+            return { ...current, loading: false, busy: false, error: error }
           })
         }
       }, [])
@@ -267,8 +284,7 @@ window.__ModuleLoader__.load({
           var data = await request(path, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),
-            // Push/pull can take minutes on slow remotes or large profiles.
+            body: JSON.stringify(body),            // Push/pull can take minutes on slow remotes or large profiles.
             timeoutMs: 600000,
           })
           var text = data.text || ''
@@ -281,17 +297,25 @@ window.__ModuleLoader__.load({
             : ''
           var notice = data.upToDate === true || /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
             ? copy.upToDate
-            : action === 'push'
-              ? copy.pushDone
-              : action === 'apply'
-                ? (installCommand ? copy.installNext.replace('{command}', installCommand) : copy.applied)
-                : copy.previewDone
+            : action === 'probe'
+              ? copy.testDone
+              : action === 'push'
+                ? copy.pushDone
+                : action === 'apply'
+                  ? (installCommand ? copy.installNext.replace('{command}', installCommand) : copy.applied)
+                  : copy.previewDone
           setView(function (current) {
             return { ...current, busy: false, busyAction: '', result: text, notice: notice }
           })
-          await load(true)
+          await load(true, false)
         } catch (error) {
           setView(function (current) {
+            // A held lock means another sync is running elsewhere (or in
+            // another window): show the dedicated busy message instead of a
+            // generic failure, and keep the card usable for a retry.
+            if (error && error.code === 'E_BUSY') {
+              return { ...current, busy: false, busyAction: '', notice: copy.busyElsewhere, error: null }
+            }
             return { ...current, busy: false, busyAction: '', error: error, notice: '' }
           })
         }
@@ -457,6 +481,18 @@ window.__ModuleLoader__.load({
               style: buttonStyle(false),
             },
             copy.refresh,
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              disabled: disabled,
+              onClick: function () {
+                run(ROUTES.probe, {}, null, 'probe')
+              },
+              style: buttonStyle(false),
+            },
+            view.busyAction === 'probe' ? copy.testBusy : copy.test,
           ),
           h(
             'button',

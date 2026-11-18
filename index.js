@@ -1,9 +1,11 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { Config, PACKAGE_NAME, normalizeConfig } from './src/config.js'
+import { Config, PACKAGE_NAME, normalizeConfig, resolveDshHome } from './src/config.js'
 import { formatError, toToolError } from './src/errors.js'
 import { createHttpRoutes } from './src/http.js'
 import { createConfigEditor } from './src/remote-config.js'
-import { pull, pullReport, push, status } from './src/sync.js'
+import { pull, pullReport, push, status, testConnection } from './src/sync.js'
+import { readActivity } from './src/activity.js'
+import { isLocked } from './src/lock.js'
 
 export const name = PACKAGE_NAME
 export const inject = ['tools']
@@ -165,7 +167,19 @@ export function apply(ctx, rawConfig) {
   // bundle still works in headless and CLI contexts without a connection.
   ctx.inject(['connection'], (scope) => {
     if (typeof scope.connection?.fetch?.register !== 'function') return
-    const routes = createHttpRoutes(config, { status, push, pull, pullReport }, createConfigEditor(ctx))
+    const routes = createHttpRoutes(
+      config,
+      {
+        status,
+        push,
+        pull,
+        pullReport,
+        probe: testConnection,
+        isBusy: () => isLocked(resolveDshHome(config)),
+        readActivity: () => readActivity(config),
+      },
+      createConfigEditor(ctx),
+    )
     withEffect(scope, 'config-sync HTTP routes', () =>
       routes.map((route) => scope.connection.fetch.register(route)),
     )

@@ -8,7 +8,7 @@ import {
   rowText,
   stripConnectionRow,
 } from './connection-block.js'
-import { SyncError } from './errors.js'
+import { SyncError, formatError } from './errors.js'
 import {
   commitManagedFiles,
   currentCommit,
@@ -17,9 +17,12 @@ import {
   headCommit,
   pushBranch,
   readBlob,
+  removeManagedFile,
   treeEntries,
 } from './git.js'
 import { withLock } from './lock.js'
+import { writeStart, writeFinish } from './activity.js'
+import { probeRemote } from './probe.js'
 import {
   allowedFiles,
   buildManifest,
@@ -305,10 +308,25 @@ function commitMessage(ctx, local, message) {
   return `sync(${ctx.profile}): ${new Date().toISOString()} from ${host}`
 }
 
+/** Wrap a locked sync operation so the activity record reflects it. */
+async function withActivity(ctx, action, run) {
+  await writeStart(ctx.config, action)
+  try {
+    const text = await run()
+    await writeFinish(ctx.config, action, true, text)
+    return text
+  } catch (error) {
+    await writeFinish(ctx.config, action, false, formatError(error))
+    throw error
+  }
+}
+
 export async function push(rawConfig, options = {}) {
   requireRemote(rawConfig)
   const ctx = await resolveContext(rawConfig)
-  return withLock(ctx.dshHome, () => pushLocked(ctx, options), { signal: options.signal })
+  return withLock(ctx.dshHome, () => withActivity(ctx, 'push', () => pushLocked(ctx, options)), {
+    signal: options.signal,
+  })
 }
 
 async function pushLocked(ctx, options) {
@@ -595,6 +613,27 @@ export async function pull(rawConfig, options = {}) {
 }
 
 /**
+ * Connection test: prove the remote is readable and writable with a tiny
+ * probe commit that is removed again. Serialized by the same lock as the
+ * real sync operations so it can never interleave with one.
+ */
+export async function testConnection(rawConfig, options = {}) {
+  requireRemote(rawConfig)
+  const ctx = await resolveContext(rawConfig)
+  const git = {
+    ensureWorkTree,
+    commitManagedFiles,
+    pushBranch,
+    currentCommit,
+    readBlob,
+    removeManagedFile,
+  }
+  return withLock(ctx.dshHome, () => withActivity(ctx, 'probe', () => probeRemote(ctx.config, git, options)), {
+    signal: options.signal,
+  })
+}
+
+/**
  * Same work as pull(), but keeps the machine-readable facts the callers need:
  * whether the pull applied a package change without installing it, and whether
  * this machine's own connection row was written back.
@@ -602,7 +641,11 @@ export async function pull(rawConfig, options = {}) {
 export async function pullReport(rawConfig, options = {}) {
   requireRemote(rawConfig)
   const ctx = await resolveContext(rawConfig)
-  return withLock(ctx.dshHome, () => pullLocked(ctx, options), { signal: options.signal })
+  return withLock(
+    ctx.dshHome,
+    () => withActivity(ctx, options.apply ? 'pull' : 'preview', () => pullLocked(ctx, options)),
+    { signal: options.signal },
+  )
 }
 
 async function pullLocked(ctx, options) {

@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-18
+
+### Added
+
+- **Connection test button.** The card's **Test connection** writes and then removes a
+  `.config-sync-probe` marker file on the remote, proving read and write access end-to-end
+  without touching synced content (probe-file pattern from dsh-plugin-account-sync). The probe
+  runs through the same git work tree and credentials a real sync uses, serialized by the same
+  lock.
+- **HTTP 409 busy semantics.** Starting a second sync while one runs now answers
+  `{ ok: false, code: 'E_BUSY', busy: true }` with HTTP 409, and the card shows a dedicated
+  "another sync is running" notice instead of a generic error.
+- **Remount state recovery.** `GET /api/config-sync/status` now reports whether a sync is in
+  flight (`busy`) plus the last recorded operation (`activity`), persisted in
+  `config-sync/activity.json`. A card mounted while a sync runs shows the busy state, and a
+  card mounted after a completed sync restores the last outcome, instead of both appearing idle
+  (syncup's `cached=1` equivalent).
+
 ## [0.6.2] - 2026-11-18
 
 ### Changed

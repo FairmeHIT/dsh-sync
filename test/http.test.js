@@ -78,11 +78,13 @@ describe('config-sync HTTP routes', () => {
       status: async () => 'status text',
       push: async () => 'push text',
       pull: async () => 'pull text',
+      probe: async () => 'probe text',
     })
     assert.deepEqual(
       routes.map((item) => [item.path, item.methods]),
       [
         [HTTP_ROUTES.status, ['GET']],
+        [HTTP_ROUTES.probe, ['POST']],
         [HTTP_ROUTES.push, ['POST']],
         [HTTP_ROUTES.pull, ['POST']],
         [HTTP_ROUTES.config, ['GET', 'POST']],

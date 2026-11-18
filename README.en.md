@@ -214,6 +214,9 @@ The card shows the remote, branch, profile and current status. On a new machine,
 **Storage:** the UI uses DSH's configuration editor to save in the running profile's configuration overlay, preserving unrelated fields. That file is also managed by sync, but this machine's `- id: config-sync` row is treated as machine-local data: it is stripped on push and merged back after a Pull applies, so the saved repository URL is not cleared by Pull. The pull output reports `preserved: config-sync row (this machine)` and the card says so after applying. If a home or command-line overlay overrides the edited fields, the editor rejects the save; it does not rewrite higher-priority configuration.
 
 - The card shows the remote, branch, profile and current status. **Refresh** is read-only.
+- **Test connection** writes and then removes a `.config-sync-probe` marker file on the remote to
+  prove the repository is readable and writable; it never touches synced content. A passing test
+  prints `Connection test passed`.
 - **Preview pull** is the same as `/sync-pull`; it writes nothing.
 - **Apply pull** asks for confirmation, snapshots, then overwrites managed local files. This
   machine's `config-sync` row is preserved.
@@ -225,6 +228,10 @@ The card shows the remote, branch, profile and current status. On a new machine,
   `next: dsh plugin --profile <profile> install`. Restart after installing.
 - **Push** accepts a commit message. The UI does not expose force; use `/sync-push --force` when
   needed.
+- Only one sync runs at a time (one shared lock across windows and tabs). Clicking during a sync
+  returns HTTP 409 `E_BUSY` and the card says another sync is running. When you leave the page and
+  come back, the card restores the busy state and the last outcome from the host instead of
+  showing idle over a running sync.
 - If the card is missing, confirm the plugin is installed and DSH restarted, then check
   `config.remote` in `~/.dsh/cordis.patch.yml`; the route is `/api/config-sync/status`.
 

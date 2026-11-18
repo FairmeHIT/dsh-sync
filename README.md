@@ -193,6 +193,8 @@ dsh plugin --profile desktop add dsh-config-git-sync
 **保存位置**：UI 通过 DSH 配置编辑器保存到当前运行 profile 的配置覆盖层，保留其他配置字段。这个文件也属于同步范围，但本机 `- id: config-sync` 那一行被当作机器本地数据：Push 时剔除、Pull 应用后并回，所以保存的仓库地址不会因为 Pull 被清空。Pull 输出里会表示 `preserved: config-sync row (this machine)`，卡片也会在应用后提示。若已有 home/命令行配置覆盖当前字段，编辑器会拒绝保存，界面会报告失败，不会修改高优先级配置。
 
 - 卡片显示远端、分支、profile 和当前状态；**刷新** 只读，不会写盘。
+- **测试连接** 会向远端写入并随后删除一个 `.config-sync-probe` 标记文件，验证仓库可读可写，
+  不触碰任何同步内容；测试通过后输出 `Connection test passed`。
 - **预览 Pull** 等价于 `/sync-pull`，只显示差异。
 - **应用 Pull** 会先确认，再写快照并覆盖本地受管文件。本机 `config-sync` 行会被保留。
 - 插件依赖默认自动安装（`reconcile: install`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
@@ -201,6 +203,9 @@ dsh plugin --profile desktop add dsh-config-git-sync
   设为 `none` 时只写文件，输出会明确写 `packages: manifest changed but dependencies were not installed`
   和 `next: dsh plugin --profile <profile> install`；执行后再重启。
 - **Push** 可填写提交信息；UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
+- 同一时刻只会有一个同步在运行（跨窗口/标签共享同一把锁）。操作期间再次点击会收到
+  HTTP 409 `E_BUSY`，卡片提示“另一台同步正在进行中”；离开页面再回来，卡片会从
+  Host 恢复“同步中”状态和上一次操作的结果，而不是显示空闲。
 - 卡片不可见时，先确认插件已安装并重启，再检查 `~/.dsh/cordis.patch.yml` 中的 `config.remote`；
   接口地址是 `/api/config-sync/status`。
 

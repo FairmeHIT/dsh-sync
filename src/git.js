@@ -414,8 +414,42 @@ export async function commitManagedFiles(config, cwd, { profile, files, message,
   return { changed: true, commit }
 }
 
-export async function pushBranch(config, cwd, options = {}) {
-  const branch = requireBranch(config)
+/**
+ * Remove one managed path from the index and commit the result, mirroring
+ * how commitManagedFiles verifies the staged set. The work-tree copy is not
+ * touched; callers decide whether a file should exist on disk. Used by the
+ * connection probe to restore the branch after a write test.
+ */
+export async function removeManagedFile(config, cwd, { profile, path, message, signal }) {
+  const prefix = `profiles/${profile}/`
+  if (!path.startsWith(prefix)) {
+    throw new SyncError('E_GIT', `refusing to remove a path outside ${prefix}: ${sanitizeText(path, 160)}`)
+  }
+  await run(config, ['rm', '--cached', '--', path], { cwd, signal })
+  await run(
+    config,
+    [
+      '-c',
+      `user.name=${config.authorName}`,
+      '-c',
+      `user.email=${config.authorEmail}`,
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--no-verify',
+      '-m',
+      message,
+    ],
+    { cwd, signal },
+  )
+  const committed = await treeEntries(config, cwd, 'HEAD', prefix, signal)
+  if (committed.some((entry) => entry.path === path)) {
+    throw new SyncError('E_GIT', `the removed path is still committed: ${sanitizeText(path, 160)}`)
+  }
+  return currentCommit(config, cwd, signal)
+}
+
+export async function pushBranch(config, cwd, options = {}) {  const branch = requireBranch(config)
   const result = await run(config, ['push', 'origin', `HEAD:refs/heads/${branch}`], {
     cwd,
     allowFail: true,

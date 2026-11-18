@@ -31,6 +31,25 @@ async function staleLock(file) {
 }
 
 /**
+ * Report whether a sync is currently running, without waiting for the lock.
+ * The card uses this on remount to restore the busy state instead of letting
+ * a user fire a second, rejected request at an in-flight sync.
+ */
+export async function isLocked(dshHome) {
+  const file = join(dshHome, 'config-sync', 'sync.lock')
+  try {
+    await stat(file)
+  } catch {
+    return false
+  }
+  if (await staleLock(file)) {
+    await rm(file, { force: true }).catch(() => {})
+    return false
+  }
+  return true
+}
+
+/**
  * Serialize cache and state operations for one Harness home. Git operations are
  * not safe to interleave on one work tree, and state.json is read-modify-write.
  * A crashed process leaves a lock that the next caller reclaims by PID/age.
