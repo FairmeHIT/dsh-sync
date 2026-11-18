@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-11-18
+
+### Fixed
+
+- **Connection test failed on a remote that already holds synced files**
+  (0.7.0 regression, reported live on a real profile): the probe committed a
+  marker-only file set while the shared work tree already contains the
+  checked-out synced files, so the staged-set verification failed with
+  `E_GIT staged file set mismatch; unexpected: profiles/.../package.json,
+  cordis.patch.yml, manifest.json`. The probe now commits the marker together
+  with the existing synced content, byte-exact, and the cleanup commit
+  removes only the marker — synced files keep their exact bytes and the
+  pre-probe tip remains an ancestor of the post-probe tip. A new e2e test
+  seeds a remote like a real sync before probing.
+
 ## [0.7.0] - 2026-11-18
 
 ### Added

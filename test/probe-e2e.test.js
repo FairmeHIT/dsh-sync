@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { after, test } from 'node:test'
@@ -11,6 +11,7 @@ import {
   commitManagedFiles,
   currentCommit,
   ensureWorkTree,
+  indexEntries,
   pushBranch,
   readBlob,
   removeManagedFile,
@@ -50,6 +51,7 @@ const git = {
   currentCommit,
   readBlob,
   removeManagedFile,
+  indexEntries,
 }
 
 test('probeRemote writes, verifies and cleans a marker on a live bare remote', async () => {
@@ -61,7 +63,7 @@ test('probeRemote writes, verifies and cleans a marker on a live bare remote', a
   const init = await gitRun(remoteDir, ['init', '--bare', '-b', 'main', '.'])
   assert.equal(init.code, 0, init.stderr)
   const seed = join(base, 'seed')
-  await mkdir(seed)
+  await mkdir(join(seed, 'profiles', 'demo'), { recursive: true })
   const s1 = await gitRun(seed, ['init', '-b', 'main', '.'])
   const s2 = await gitRun(
     seed,
@@ -94,6 +96,60 @@ test('probeRemote writes, verifies and cleans a marker on a live bare remote', a
   const work = await ensureWorkTree(config, { fetch: false })
   const listing = await gitRun(work, ['ls-files'])
   assert.ok(!listing.stdout.includes('.config-sync-probe'))
+})
+
+test('probeRemote works on a remote that already holds synced files', async () => {
+  const base = await makeTemp()
+  const remoteDir = join(base, 'remote.git')
+  await mkdir(remoteDir)
+  await gitRun(remoteDir, ['init', '--bare', '-b', 'main', '.'])
+
+  // Seed the remote exactly like a real sync would: a committed profile
+  // directory with synced files on the branch.
+  const seed = join(base, 'seed')
+  await mkdir(join(seed, 'profiles', 'demo'), { recursive: true })
+  await gitRun(seed, ['init', '-b', 'main', '.'])
+  const seedConfig = normalizeConfig({ remote: remoteDir, branch: 'main', profile: 'demo', dshHome: join(base, 'seedhome') })
+  const seeded = new Map([
+    ['profiles/demo/package.json', Buffer.from('{"name":"seed"}\n', 'utf8')],
+    ['profiles/demo/cordis.patch.yml', Buffer.from('- insert:\n    - id: seed\n', 'utf8')],
+  ])
+  await gitRun(seed, ['remote', 'add', 'origin', remoteDir])
+  const seededWork = await ensureWorkTree(seedConfig, { fetch: false })
+  for (const [path, data] of seeded) {
+    await mkdir(join(seededWork, dirname(path)), { recursive: true })
+    await writeFile(join(seededWork, path), data)
+  }
+  await commitManagedFiles(seedConfig, seededWork, { profile: 'demo', files: seeded, message: 'seed' })
+  await pushBranch(seedConfig, seededWork, {})
+  const remoteTipBefore = (await gitRun(remoteDir, ['rev-parse', 'HEAD'])).stdout.trim()
+
+  const home = join(base, 'home')
+  await mkdir(join(home, 'profiles', 'demo'), { recursive: true })
+  const config = normalizeConfig({
+    remote: remoteDir,
+    branch: 'main',
+    profile: 'demo',
+    dshHome: home,
+  })
+
+  const text = await probeRemote(config, git)
+  assert.match(text, /read: ok/)
+  assert.match(text, /write: ok/)
+  assert.match(text, /round-trip: ok/)
+  assert.match(text, /cleanup: ok/)
+
+  // The marker is gone and every synced file kept its exact bytes.
+  const tree = await gitRun(remoteDir, ['ls-tree', '-r', 'HEAD'])
+  assert.ok(!tree.stdout.includes('.config-sync-probe'), `marker leaked: ${tree.stdout}`)
+  for (const [path, data] of seeded) {
+    const blob = await gitRun(remoteDir, ['cat-file', 'blob', `HEAD:${path}`])
+    assert.equal(blob.stdout, data.toString('utf8'), `${path} changed by the probe`)
+  }
+  // The cleanup commit only added the marker's removal; the pre-probe tip is
+  // an ancestor of the post-probe tip.
+  const mergeBase = await gitRun(remoteDir, ['merge-base', '--is-ancestor', remoteTipBefore, 'HEAD'])
+  assert.equal(mergeBase.code, 0, 'pre-probe tip must remain an ancestor of the post-probe tip')
 })
 
 test('probeRemote refuses to run without a remote', async () => {

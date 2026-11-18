@@ -319,7 +319,7 @@ async function stageFile(config, cwd, path, data, signal) {
   return hash.stdout
 }
 
-async function indexEntries(config, cwd, prefix, signal) {
+export async function indexEntries(config, cwd, prefix, signal) {
   const result = await run(config, ['ls-files', '-s', '-z', '--', prefix], {
     cwd,
     trim: false,
