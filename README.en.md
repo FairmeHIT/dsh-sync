@@ -218,7 +218,8 @@ The card shows the remote, branch, profile and current status. On a new machine,
 - **Apply pull** asks for confirmation, snapshots, then overwrites managed local files. This
   machine's `config-sync` row is preserved.
 - Apply pull installs dependencies by default (`reconcile: install`). When the pull changed `package.json`,
-  a lockfile or the plugin list, the plugin runs `pnpm install` (or corepack/npm fallbacks) in the profile
+  a lockfile or the plugin list, the plugin runs `pnpm install` (the DSH-bundled node+pnpm runtime first,
+  then pnpm/corepack/npm from PATH) in the profile
   directory and reports `packages: installed with <tool>`. With `reconcile: none` the output instead states
   `packages: manifest changed but dependencies were not installed` and
   `next: dsh plugin --profile <profile> install`. Restart after installing.
@@ -363,8 +364,9 @@ decides the result. Git history keeps every step, but the conflict itself needs 
   A missing local `package.json` no longer blocks status or pull, so the normal recovery path can
   restore it; push still refuses a profile without `package.json`.
 - When `package.json`, a lockfile or the workspace file changes and `reconcile=install`, the plugin
-  tries `pnpm install`, then `corepack pnpm install`, then
-  `npm install --no-audit --no-fund`. A real install failure stops there instead of letting a
+  first runs the node+pnpm runtime bundled with DSH (`dsh-primary-runtime`, the same pnpm
+  `dsh plugin install` uses, so no system PATH is required), then `pnpm install`,
+  `corepack pnpm install`, and `npm install --no-audit --no-fund`. A real install failure stops there instead of letting a
   different package manager overwrite the result.
 - `link:` / `file:` / `workspace:` dependencies cannot be restored across machines and are
   reported as manual work.

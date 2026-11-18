@@ -47,6 +47,7 @@ import {
 import { scanForSecrets, summarizeSecrets } from './secrets.js'
 import { readState, writeState } from './state.js'
 import { sanitizeText, summarizeList } from './text.js'
+import { findBundledRuntime, bundledPnpmInvocation } from './runtime.js'
 
 export { PACKAGE_NAME }
 
@@ -552,11 +553,15 @@ export function isMissingCommand(result) {
 
 export async function reconcilePackages(ctx, options = {}) {
   if (ctx.config.reconcile === 'none') return { ok: true, skipped: true, output: 'reconcile: none' }
+  const attempts = []
+  // The DSH-bundled runtime is the same pnpm `dsh plugin install` uses, so try
+  // it first: an install then never depends on the system PATH.
+  const bundled = bundledPnpmInvocation(findBundledRuntime(ctx.dshHome))
+  if (bundled) attempts.push(bundled)
   const managers = packageManagerOrder({
     pnpmLock: await pathExists(join(ctx.profileDir, 'pnpm-lock.yaml')),
     npmLock: await pathExists(join(ctx.profileDir, 'package-lock.json')),
   })
-  const attempts = []
   for (const manager of managers) {
     if (manager === 'pnpm') attempts.push({ tool: 'pnpm', command: 'pnpm', args: ['install'] })
     else if (manager === 'corepack') {

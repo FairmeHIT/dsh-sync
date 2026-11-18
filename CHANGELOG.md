@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-11-18
+
+### Changed
+
+- **Dependency install now prefers the pnpm bundled with DSH.** `reconcile: install` first runs the
+  node+pnpm runtime shipped with DSH (`dsh-primary-runtime`, the exact pnpm `dsh plugin install`
+  itself uses, located via `DSH_PACK_HOME` or the DSH home), so an install after pull no longer
+  depends on pnpm/corepack/npm being on the system PATH. The previous chain
+  (`pnpm`, `corepack pnpm`, `npm install`) remains as the fallback when no bundled runtime is found.
+
 ## [0.6.1] - 2026-11-18
 
 ### Changed

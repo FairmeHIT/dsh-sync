@@ -196,7 +196,8 @@ dsh plugin --profile desktop add dsh-config-git-sync
 - **预览 Pull** 等价于 `/sync-pull`，只显示差异。
 - **应用 Pull** 会先确认，再写快照并覆盖本地受管文件。本机 `config-sync` 行会被保留。
 - 插件依赖默认自动安装（`reconcile: install`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
-  会在 profile 目录里运行 `pnpm install`（或 corepack/npm 兜底），成功后输出 `packages: installed with <工具>`。
+  会在 profile 目录里运行 `pnpm install`（优先用 DSH 自带的 node+pnpm 运行时，其次 PATH 上的 pnpm/corepack/npm 兜底），
+  成功后输出 `packages: installed with <工具>`。
   设为 `none` 时只写文件，输出会明确写 `packages: manifest changed but dependencies were not installed`
   和 `next: dsh plugin --profile <profile> install`；执行后再重启。
 - **Push** 可填写提交信息；UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
@@ -322,8 +323,10 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 - `pull apply` 会把远端受管文件写到本地；本机同步过、远端已不存在的受管文件会删除（快照里仍有副本），
   本机从未同步过的文件会保留并标记 `kept locally`。本地 `package.json` 丢失时，status 和 pull 仍可
   正常工作并把它恢复；push 会拒绝缺少 `package.json` 的 profile。
-- `package.json`、锁文件或 workspace 文件变化且 `reconcile=install` 时，优先用 `pnpm install`，
-  其次 `corepack pnpm install`，最后 `npm install --no-audit --no-fund`；真正的安装失败会停止并报告，
+- `package.json`、锁文件或 workspace 文件变化且 `reconcile=install` 时，优先用 DSH 自带的
+  `dsh-primary-runtime` 里的 node+pnpm（与 `dsh plugin install` 同一版本，不依赖系统 PATH），
+  其次 `pnpm install`、`corepack pnpm install`、`npm install --no-audit --no-fund`；
+  真正的安装失败会停止并报告，
   不会再用另一个包管理器覆盖。
 - `link:` / `file:` / `workspace:` 依赖无法跨机器还原，会在输出里标记为需要手动安装。
 - 分支不存在时会创建新的根提交，只包含当前 profile 的受管文件，不会把其它分支历史带进来；远端分支
