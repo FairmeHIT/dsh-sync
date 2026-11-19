@@ -620,8 +620,14 @@ window.__ModuleLoader__.load({
         var latest = update.latest || ''
         // Nothing is known about the version until a check answers, so an
         // offline mount shows the action alone instead of a made-up version.
+        // The arrow appears only while an update is on the table: a pinned copy
+        // can sit ahead of the branch it was pinned from, and "0.7.5 → 0.7.3"
+        // would read as an instruction to downgrade.
+        var offersUpdate = phase === 'available' || phase === 'updating' || phase === 'failed'
         var line = current ? copy.version + ' ' + current : ''
-        if (line && latest && latest !== current) line = copy.version + ' ' + current + ' → ' + latest
+        if (line && offersUpdate && latest && latest !== current) {
+          line = copy.version + ' ' + current + ' → ' + latest
+        }
         var note = ''
         var warn = false
         if (phase === 'unsupported') {

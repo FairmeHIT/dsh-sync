@@ -461,6 +461,17 @@ test('a local install explains itself instead of offering an update', async () =
   assert.equal(ui.find((n) => n.type === 'button' && /Update|Check for updates/.test(ui.text(n))), undefined)
 })
 
+test('a pinned copy ahead of its branch shows no downgrade arrow', async () => {
+  // After an in-card update the dependency pins a commit, so the published
+  // branch version can be older than what runs. The row must not suggest going
+  // backwards.
+  const ui = setup({ update: response({ ok: true, supported: true, current: '0.7.5', latest: '0.7.3', available: false }) })
+  await tick()
+  assert.ok(ui.find((n) => n.type === 'div' && ui.text(n) === 'Plugin 0.7.5'))
+  assert.equal(ui.find((n) => n.type === 'div' && /→/.test(ui.text(n))), undefined)
+  assert.equal(ui.button('Check for updates').props.disabled, false)
+})
+
 test('a version row speaks Chinese when the client does', async () => {
   const ui = setup({
     language: 'zh-CN',
