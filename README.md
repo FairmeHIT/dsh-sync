@@ -203,6 +203,12 @@ dsh plugin --profile desktop add dsh-config-git-sync
   设为 `none` 时只写文件，输出会明确写 `packages: manifest changed but dependencies were not installed`
   和 `next: dsh plugin --profile <profile> install`；执行后再重启。
 - **Push** 可填写提交信息；UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
+- **插件版本与更新**：卡片底部显示本插件当前版本，打开卡片时会静默检查一次 GitHub 上的
+  `package.json`。有新版本时出现 **更新到 x.y.z**，点击后交给 DSH 自带的插件管理器原地重装
+  （失败自动回滚到旧版本），卡片会短暂中断，完成后提示刷新页面。更新后本机依赖会被固定到完整
+  commit（`github:owner/repo#<sha>`），此后 DSH 原生插件页也能显示更新并回滚。用本地目录或
+  `link:` 安装时不提供更新按钮（会破坏开发目录），卡片会说明原因；离线导致检查失败时不显示错误，
+  只保留 **检查更新**。
 - 同一时刻只会有一个同步在运行（跨窗口/标签共享同一把锁）。操作期间再次点击会收到
   HTTP 409 `E_BUSY`，卡片提示“另一台同步正在进行中”；离开页面再回来，卡片会从
   Host 恢复“同步中”状态和上一次操作的结果，而不是显示空闲。
@@ -358,6 +364,9 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
   要安装的包及其安装脚本，因此只应对可信仓库保持默认。不信任时设为 `none`。
 - 本插件按 Git 对象的精确字节校验。如果另一台机器用 `core.autocrlf=true` 提交并改写了行尾，远端会报
   `E_MANIFEST`；请用 `core.autocrlf=false` 重新提交受管文件。插件自己的缓存始终关闭行尾转换。
+- 卡片内更新只有一种前提：本插件当初从 GitHub 安装，且当前 DSH 提供插件管理器服务。更新需要访问
+  GitHub（读取远端 `package.json`，再用 `git ls-remote` 取分支 commit）；两者失败时卡片只提示原因，
+  同步功能不受影响。
 
 ## 故障排查
 
@@ -379,6 +388,8 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 | `E_CONFIG_BUSY` / `E_CONFIG_SAVE` | 配置保存正在进行或写入失败；稍等插件重载后重试，检查高优先级覆盖 |
 | `E_CONFIG_TIMEOUT` / `E_TIMEOUT` | 插件页面请求超时（保存 15s / 读取 90s / 同步 10min）；网络慢时重试 |
 | `E_HTTP` | 插件页面请求失败（路由未响应或返回非 JSON）；刷新页面，必要时重启 DSH |
+| `E_UPDATE_UNSUPPORTED` / `E_UPDATE_CURRENT` | 当前安装不能从卡片更新（本地目录安装、非 GitHub 来源、宿主无插件管理器），或已经是最新版本 |
+| `E_UPDATE_CHECK` / `E_UPDATE_REMOTE` / `E_UPDATE_GIT` | 检查更新失败：读不到远端 `package.json` 或无法 `git ls-remote`；确认能访问 GitHub 后点 **检查更新** 重试 |
 | Git 认证失败 | 配置 SSH key 或预先缓存 HTTPS 凭据；插件不会弹出登录框 |
 | pull 后插件没变化 | 重启 DSH；`cordis.patch.yml` 只在启动时组合 |
 

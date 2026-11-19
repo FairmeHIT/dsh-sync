@@ -141,7 +141,7 @@ describe('plugin entry', () => {
     assert.match(result.text, /^E_CONFIG:/)
   })
 
-  test('registers five HTTP routes when a connection exists', () => {
+  test('registers seven HTTP routes when a connection exists', () => {
     const { ctx, routes, disposers } = fakeContext({ withConnection: true })
     apply(ctx, {})
     assert.deepEqual(routes.map((route) => route.path).sort(), [
@@ -150,12 +150,14 @@ describe('plugin entry', () => {
       '/api/config-sync/pull',
       '/api/config-sync/push',
       '/api/config-sync/status',
+      '/api/config-sync/update',
+      '/api/config-sync/update-state',
     ])
     for (const route of routes) {
       assert.equal(typeof route.fetch, 'function')
       assert.equal(route.requestBody, 'buffered')
     }
-    assert.equal(disposers.length, 11)
+    assert.equal(disposers.length, 13)
   })
 
   test('loads without the optional commands service', () => {

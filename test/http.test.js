@@ -88,6 +88,8 @@ describe('config-sync HTTP routes', () => {
         [HTTP_ROUTES.push, ['POST']],
         [HTTP_ROUTES.pull, ['POST']],
         [HTTP_ROUTES.config, ['GET', 'POST']],
+        [HTTP_ROUTES.update, ['GET', 'POST']],
+        [HTTP_ROUTES.updateState, ['GET']],
       ],
     )
     for (const item of routes) assert.equal(item.requestBody, 'buffered')
@@ -214,4 +216,82 @@ test('a pull without a report keeps needsInstall false instead of undefined', as
   const { body } = await call(routes, HTTP_ROUTES.pull, { method: 'POST', body: { apply: true } })
   assert.equal(body.needsInstall, false)
   assert.equal(body.upToDate, true)
+})
+
+describe('plugin update routes', () => {
+  const checkState = {
+    ok: true,
+    supported: true,
+    current: '0.7.2',
+    latest: '0.7.3',
+    available: true,
+    source: 'github:FairmeHIT/dsh-sync#e9b312d',
+    repo: 'FairmeHIT/dsh-sync',
+    branch: 'main',
+    mode: 'update',
+  }
+
+  test('GET /update answers the read-only version check', async () => {
+    let seen
+    const routes = createHttpRoutes(config, {
+      checkUpdate: async (value) => {
+        seen = value
+        return checkState
+      },
+    })
+    const { response, body } = await call(routes, HTTP_ROUTES.update)
+    assert.equal(response.status, 200)
+    assert.equal(seen, config)
+    assert.equal(body.supported, true)
+    assert.equal(body.latest, '0.7.3')
+    assert.equal(body.available, true)
+  })
+
+  test('POST /update accepts before installing and never echoes a credential', async () => {
+    let started
+    const routes = createHttpRoutes(config, {
+      startUpdate: async (value) => {
+        started = value
+        return { from: '0.7.2', to: '0.7.3', spec: 'x', settled: Promise.resolve({ ok: true }) }
+      },
+    })
+    const { response, body } = await call(routes, HTTP_ROUTES.update, { method: 'POST', body: {} })
+    assert.equal(response.status, 202)
+    assert.equal(started, config)
+    assert.equal(body.accepted, true)
+    assert.equal(body.from, '0.7.2')
+    assert.equal(body.to, '0.7.3')
+    assert.doesNotMatch(JSON.stringify(body), /secret|pass|top-secret/)
+  })
+
+  test('POST /update reports a refused update through the failure shape', async () => {
+    const routes = createHttpRoutes(config, {
+      startUpdate: async () => {
+        throw new SyncError('E_UPDATE_UNSUPPORTED', 'the plugin is installed from a local path')
+      },
+    })
+    const { response, body } = await call(routes, HTTP_ROUTES.update, { method: 'POST', body: {} })
+    assert.equal(response.status, 200)
+    assert.equal(body.ok, false)
+    assert.equal(body.code, 'E_UPDATE_UNSUPPORTED')
+    assert.match(body.message, /local path/)
+  })
+
+  test('POST /update rejects a malformed body as a request error', async () => {
+    const routes = createHttpRoutes(config, { startUpdate: async () => assert.fail('must not run') })
+    const { response, body } = await call(routes, HTTP_ROUTES.update, { method: 'POST', body: '{' })
+    assert.equal(response.status, 400)
+    assert.equal(body.code, 'E_REQUEST')
+  })
+
+  test('GET /update-state reports the last outcome, or null when there is none', async () => {
+    const values = [null, { status: 'done', from: '0.7.2', to: '0.7.3', message: '' }]
+    const routes = createHttpRoutes(config, { readUpdateState: async () => values.shift() })
+    const first = await call(routes, HTTP_ROUTES.updateState)
+    assert.equal(first.body.ok, true)
+    assert.equal(first.body.update, null)
+    const second = await call(routes, HTTP_ROUTES.updateState)
+    assert.equal(second.body.update.status, 'done')
+    assert.equal(second.body.update.to, '0.7.3')
+  })
 })

@@ -16,6 +16,8 @@ window.__ModuleLoader__.load({
       pull: '/api/config-sync/pull',
       config: '/api/config-sync/config',
       probe: '/api/config-sync/probe',
+      update: '/api/config-sync/update',
+      updateState: '/api/config-sync/update-state',
     }
 
     var zh =
@@ -72,6 +74,18 @@ window.__ModuleLoader__.load({
           requestTimeout: '请求超时，请稍后重试。',
           busyElsewhere: '另一台同步正在进行中（可能来自本机或其他窗口），请稍后再试。',
           error: '操作失败',
+          version: '插件',
+          checkUpdate: '检查更新',
+          checkingUpdate: '检查中…',
+          updateTo: '更新到 {version}',
+          updating: '正在更新…',
+          updateHint: '更新会重装插件，卡片短暂中断，完成后刷新页面即可。',
+          updateLocal: '本机路径安装，卡片内无法更新。',
+          updateOther: '非 GitHub 安装，卡片内无法更新。',
+          updateFailed: '更新失败',
+          updateTimeout: '更新没有按时完成，请刷新页面查看版本。',
+          updated: '已更新到 {version}。刷新页面加载新界面。',
+          reload: '刷新页面',
         }
       : {
           title: 'Config sync',
@@ -123,6 +137,18 @@ window.__ModuleLoader__.load({
           requestTimeout: 'The request timed out. Please retry.',
           busyElsewhere: 'Another sync is already running (possibly from this machine or another window). Retry shortly.',
           error: 'Request failed',
+          version: 'Plugin',
+          checkUpdate: 'Check for updates',
+          checkingUpdate: 'Checking…',
+          updateTo: 'Update to {version}',
+          updating: 'Updating…',
+          updateHint: 'Updating reinstalls the plugin; the card drops out briefly. Reload the page when it finishes.',
+          updateLocal: 'Installed from a local path, so the card cannot update it.',
+          updateOther: 'Not a GitHub install, so the card cannot update it.',
+          updateFailed: 'Update failed',
+          updateTimeout: 'The update did not finish in time. Reload the page to see the version.',
+          updated: 'Updated to {version}. Reload the page to load the new UI.',
+          reload: 'Reload page',
         }
 
     var CSS = `
@@ -171,6 +197,12 @@ window.__ModuleLoader__.load({
 .dcfg-advbody { display:flex; flex-direction:column; gap:10px; }
 .dcfg-pre { margin:0; max-height:260px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.55; padding:10px 12px; border-radius:8px; background:var(--dsw-alias-bg-layer-2, rgba(127,127,127,.06)); }
 .dcfg-progress { width:100%; height:6px; accent-color:var(--dsw-alias-brand-primary, currentColor); }
+.dcfg-version { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; border-top:1px dashed var(--dsw-alias-border-l1, rgba(127,127,127,.22)); padding-top:10px; }
+.dcfg-versiontext { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.dcfg-versionline { font-size:12.5px; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); }
+.dcfg-versionline strong { color:inherit; font-weight:600; }
+.dcfg-version-note { font-size:12px; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); }
+.dcfg-version-note-warn { color:var(--dsw-alias-state-warn-primary, #b7791f); }
 @media (max-width:560px) {
   .dcfg-head { flex-direction:column; }
   .dcfg-facts { grid-template-columns:1fr; }
@@ -281,6 +313,7 @@ window.__ModuleLoader__.load({
         remoteHidden: false,
         saving: false,
         configError: null,
+        update: null,
       })
       var view = state[0]
       var setView = state[1]
@@ -343,6 +376,15 @@ window.__ModuleLoader__.load({
           loadConfig()
         },
         [load],
+      )
+
+      // One silent version check per mount: the reader sees whether a newer
+      // release exists without asking, and an offline host shows nothing.
+      React.useEffect(
+        function () {
+          checkUpdate(true)
+        },
+        [],
       )
 
       async function run(path, body, action) {
@@ -441,6 +483,117 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // The card runs no installer of its own: the DSH plugin manager unloads
+      // this version, installs the published commit and rolls back on failure.
+      // The install kills the request that started it, so its outcome is
+      // followed through the state file instead of the install response.
+      async function checkUpdate(silent) {
+        // A silent mount check shows nothing until it answers, so the row never
+        // flashes "Checking…" over a slow GitHub read.
+        if (!silent) {
+          setView(function (current) {
+            return { ...current, update: { ...(current.update || {}), phase: 'checking', message: '' } }
+          })
+        }
+        try {
+          var data = await request(ROUTES.update, { timeoutMs: 30000 })
+          setView(function (current) {
+            return {
+              ...current,
+              update: {
+                phase: data.supported !== true ? 'unsupported' : data.available === true ? 'available' : 'current',
+                current: data.current || '',
+                latest: data.latest || '',
+                reason: data.reason || '',
+                message: data.error || '',
+              },
+            }
+          })
+        } catch (error) {
+          setView(function (current) {
+            // The mount-time check stays silent: a GitHub outage must not greet
+            // the reader with an error on an otherwise healthy card.
+            if (silent) return { ...current, update: { phase: 'unavailable', current: '', latest: '', reason: '', message: '' } }
+            return {
+              ...current,
+              update: { ...(current.update || {}), phase: 'check-failed', message: (error && error.message) || '' },
+            }
+          })
+        }
+      }
+
+      function pollUpdate(tries) {
+        var attempt = (tries || 0) + 1
+        function next() {
+          if (attempt >= 80) {
+            setView(function (current) {
+              return { ...current, update: { ...(current.update || {}), phase: 'check-failed', message: copy.updateTimeout } }
+            })
+            return
+          }
+          setTimeout(function () { pollUpdate(attempt) }, 1500)
+        }
+        request(ROUTES.updateState, { timeoutMs: 15000 })
+          .then(function (data) {
+            var state = data.update
+            if (!state || state.status === 'running') {
+              next()
+              return
+            }
+            setView(function (current) {
+              if (state.status === 'done') {
+                return {
+                  ...current,
+                  update: { phase: 'done', current: state.to, latest: state.to, reason: '', message: '' },
+                  notice: copy.updated.replace('{version}', state.to),
+                }
+              }
+              return {
+                ...current,
+                update: {
+                  ...(current.update || {}),
+                  phase: 'failed',
+                  current: state.from || (current.update && current.update.current) || '',
+                  latest: state.to || '',
+                  message: state.message || copy.updateFailed,
+                },
+              }
+            })
+          })
+          .catch(function () {
+            // The plugin is unloading: its routes fail for a moment, which is
+            // expected while the replacement starts.
+            next()
+          })
+      }
+
+      async function startUpdate() {
+        setView(function (current) {
+          return { ...current, update: { ...(current.update || {}), phase: 'updating', message: '' } }
+        })
+        try {
+          await request(ROUTES.update, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+            // The host answers before it installs, so this stays short.
+            timeoutMs: 120000,
+          })
+          pollUpdate(0)
+        } catch (error) {
+          setView(function (current) {
+            return {
+              ...current,
+              update: {
+                ...(current.update || {}),
+                phase: 'failed',
+                message: (error && error.message) || copy.updateFailed,
+              },
+            }
+          })
+        }
+      }
+
       function busyLabel(action) {
         if (action === 'push') return copy.pushBusy
         if (action === 'probe') return copy.testBusy
@@ -452,6 +605,68 @@ window.__ModuleLoader__.load({
         return h('div', { className: 'dcfg-fact' },
           h('div', { className: 'dcfg-key' }, label),
           h('div', { className: 'dcfg-val', title: value || '' }, value || '—'),
+        )
+      }
+
+      /**
+       * The plugin's own version, and the one action that fits its state:
+       * check, update, or reload once the manager has installed a new copy.
+       */
+      function versionRow() {
+        var update = view.update
+        if (!update) return null
+        var phase = update.phase
+        var current = update.current || ''
+        var latest = update.latest || ''
+        // Nothing is known about the version until a check answers, so an
+        // offline mount shows the action alone instead of a made-up version.
+        var line = current ? copy.version + ' ' + current : ''
+        if (line && latest && latest !== current) line = copy.version + ' ' + current + ' → ' + latest
+        var note = ''
+        var warn = false
+        if (phase === 'unsupported') {
+          note = update.reason === 'local-install'
+            ? copy.updateLocal
+            : update.reason === 'not-github'
+              ? copy.updateOther
+              : update.message || copy.updateOther
+          warn = true
+        } else if (phase === 'check-failed' || phase === 'failed') {
+          note = update.message || copy.updateFailed
+          warn = true
+        } else if (phase === 'available' || phase === 'updating') {
+          note = copy.updateHint
+        }
+        var label = ''
+        if (phase === 'done') label = copy.reload
+        else if (phase === 'available' || phase === 'failed') label = copy.updateTo.replace('{version}', latest || '')
+        else if (phase === 'updating') label = copy.updating
+        else if (phase === 'checking') label = copy.checkingUpdate
+        else if (phase !== 'unsupported') label = copy.checkUpdate
+        var updateDisabled = view.busy || view.saving || phase === 'checking' || phase === 'updating'
+        return h('div', { className: 'dcfg-version' },
+          h('div', { className: 'dcfg-versiontext' },
+            line ? h('div', { className: 'dcfg-versionline' }, line) : null,
+            note ? h('div', { className: 'dcfg-version-note' + (warn ? ' dcfg-version-note-warn' : '') }, note) : null,
+          ),
+          label
+            ? h('button', {
+                type: 'button',
+                className: 'dcfg-btn' + (phase === 'available' || phase === 'done' ? ' dcfg-btn-primary' : ''),
+                disabled: updateDisabled,
+                onClick: function () {
+                  if (phase === 'done') {
+                    if (typeof window !== 'undefined' && window.location) window.location.reload()
+                    return
+                  }
+                  if (phase === 'available' || phase === 'failed') {
+                    startUpdate()
+                    return
+                  }
+                  checkUpdate(false)
+                },
+              }, label)
+            : null,
         )
       }
 
@@ -477,7 +692,8 @@ window.__ModuleLoader__.load({
       }
 
       var data = view.data || {}
-      var disabled = view.busy || view.loading || view.saving
+      var updating = view.update && view.update.phase === 'updating'
+      var disabled = view.busy || view.loading || view.saving || updating
       // A stalled fetch must never lock the user out of Refresh: only a sync
       // action or config save disables it, so a hung status read can be retried.
       var refreshDisabled = view.busy || view.saving
@@ -538,6 +754,7 @@ window.__ModuleLoader__.load({
             fact(copy.branch, data.branch),
             fact(copy.profile, data.profile),
           ),
+          versionRow(),
           h('div', { className: 'dcfg-actions' },
             h('button', {
               type: 'button',

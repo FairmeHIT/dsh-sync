@@ -12,6 +12,8 @@ export const HTTP_ROUTES = Object.freeze({
   pull: '/api/config-sync/pull',
   config: '/api/config-sync/config',
   probe: '/api/config-sync/probe',
+  update: '/api/config-sync/update',
+  updateState: '/api/config-sync/update-state',
 })
 
 class BadRequest extends Error {
@@ -181,6 +183,43 @@ export function createHttpRoutes(config, operations, editor) {
     }
   }
 
+  /**
+   * The plugin's own version and, when it was installed from GitHub, the
+   * version that repository publishes now. Read-only, so the card may call it
+   * on every mount.
+   */
+  async function updateCheckRoute() {
+    try {
+      return json(await operations.checkUpdate(config))
+    } catch (error) {
+      return failure(config, error)
+    }
+  }
+
+  /**
+   * Start replacing this plugin with the published version. The installation
+   * unloads the plugin serving this request, so the answer is an acceptance:
+   * the card follows the outcome through updateStateRoute.
+   */
+  async function updateStartRoute(request) {
+    try {
+      await readBody(request)
+      const result = await operations.startUpdate(config)
+      return json({ ok: true, ...identity(config), accepted: true, from: result.from, to: result.to }, 202)
+    } catch (error) {
+      return failure(config, error, error instanceof BadRequest ? 400 : 200)
+    }
+  }
+
+  async function updateStateRoute() {
+    try {
+      const update = await operations.readUpdateState(config)
+      return json({ ok: true, ...identity(config), update })
+    } catch (error) {
+      return failure(config, error)
+    }
+  }
+
   return [
     {
       path: HTTP_ROUTES.status,
@@ -211,6 +250,18 @@ export function createHttpRoutes(config, operations, editor) {
       methods: ['GET', 'POST'],
       requestBody: 'buffered',
       fetch: configRoute,
+    },
+    {
+      path: HTTP_ROUTES.update,
+      methods: ['GET', 'POST'],
+      requestBody: 'buffered',
+      fetch: (request) => (request.method === 'POST' ? updateStartRoute(request) : updateCheckRoute()),
+    },
+    {
+      path: HTTP_ROUTES.updateState,
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: updateStateRoute,
     },
   ]
 }

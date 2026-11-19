@@ -12,11 +12,17 @@ function deferred() {
   return { promise, resolve }
 }
 
-function setup({ language = 'en', configFailure = false, config = { ...status, remoteEditable: true, persistence: 'profile-patch' } } = {}) {
-  let current, initial = true, effect, Card, exported
+function setup({ language = 'en', configFailure = false, update = null, updateState = null, config = { ...status, remoteEditable: true, persistence: 'profile-patch' } } = {}) {
+  let current, initial = true, Card, exported
+  const effects = []
   const calls = [], queue = [], configCalls = [], configQueue = []
+  const updateCalls = [], updateQueue = [], stateCalls = [], stateQueue = []
   const timers = new Map(); let timerId = 0
   const deadlines = []
+  const upToDateCheck = { ok: true, supported: true, current: '0.7.2', latest: '0.7.2', available: false }
+  // Seed the mount-time check and the polled state before the card mounts.
+  if (update !== null) updateQueue.push(update)
+  if (updateState !== null) stateQueue.push(updateState)
   const React = {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
     useState(value) {
@@ -24,24 +30,39 @@ function setup({ language = 'en', configFailure = false, config = { ...status, r
       return [current, (next) => { current = typeof next === 'function' ? next(current) : next }]
     },
     useCallback: (callback) => callback,
-    useEffect(fn) { if (initial) effect = fn },
+    useEffect(fn) { if (initial) effects.push(fn) },
   }
   const window = { __ModuleLoader__: { load(def) { exported = def.factory(() => React) } } }
+  const stall = (options) => new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+  const settle = (next, options) => {
+    if (next === 'hang') return stall(options)
+    if (next === 'reject') return Promise.reject(new Error('offline'))
+    return Promise.resolve(next)
+  }
   const fetch = (path, options) => {
     if (path === '/api/config-sync/config') {
       configCalls.push({ path, options })
       if (configFailure === true && configCalls.length === 1) return Promise.reject(new Error('offline'))
-      if (configFailure === 'hang' && configCalls.length === 1) return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
-      const next = configQueue.length ? configQueue.shift() : response(config)
-      if (next === 'hang') return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
-      return Promise.resolve(next)
+      if (configFailure === 'hang' && configCalls.length === 1) return stall(options)
+      return settle(configQueue.length ? configQueue.shift() : response(config), options)
+    }
+    // The card checks the plugin version once per mount and then follows an
+    // update through a second route; neither may consume the sync queue.
+    if (path === '/api/config-sync/update') {
+      updateCalls.push({ path, options })
+      const post = options?.method === 'POST'
+      if (post) return Promise.resolve(updateQueue.length ? updateQueue.shift() : response({ ok: true, accepted: true }))
+      return settle(updateQueue.length ? updateQueue.shift() : response(upToDateCheck), options)
+    }
+    if (path === '/api/config-sync/update-state') {
+      stateCalls.push({ path, options })
+      return settle(stateQueue.length ? stateQueue.shift() : response({ ok: true, update: null }), options)
     }
     calls.push({ path, options })
     // 'hang' entries stall until the request signal aborts, so deadline
     // behavior (status 90s, push/pull 10min) can be tested synchronously.
-    if (queue[0] === 'hang') return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
     assert.ok(queue.length, `unexpected request: ${path}`)
-    return Promise.resolve(queue.shift())
+    return settle(queue.shift(), options)
   }
   new Function('window', 'navigator', 'fetch', 'setTimeout', 'clearTimeout', source)(window, { language }, fetch, (resolve, ms) => {
     if (ms === 500) { resolve(); return 0 }
@@ -59,8 +80,8 @@ function setup({ language = 'en', configFailure = false, config = { ...status, r
   const button = (label) => { const node = find((n) => n.type === 'button' && text(n) === label); assert.ok(node, `button ${label}`); return node }
   const notice = () => { const node = find((n) => n.props.role === 'status'); return node && text(node) }
   const pre = () => text(find((n) => n.type === 'pre'))
-  queue.push(response(status)); render(); effect()
-  return { calls, queue, configCalls, configQueue, render, find, text, button, notice, pre, deadlines, expire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((fn) => fn()) } }
+  queue.push(response(status)); render(); effects.forEach((fn) => fn())
+  return { calls, queue, configCalls, configQueue, updateCalls, updateQueue, stateCalls, stateQueue, render, find, text, button, notice, pre, deadlines, expire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((fn) => fn()) } }
 }
 
 test('failed initial config load cannot save unknown defaults and explicit retry restores form', async () => {
@@ -351,4 +372,101 @@ test('a preview never tells the user to install anything', async () => {
   ui.button('Preview pull').props.onClick(); await tick(); await tick()
   assert.equal(ui.notice(), 'Preview ready. Nothing has been written yet.')
   assert.doesNotMatch(ui.notice(), /dsh plugin/)
+})
+
+test('the card checks the version once on mount and stays quiet when it cannot', async () => {
+  const ui = setup(); await tick()
+  assert.equal(ui.updateCalls.length, 1, 'exactly one check per mount')
+  assert.deepEqual(ui.stateCalls.length, 0)
+  const line = ui.find((n) => n.type === 'div' && ui.text(n) === 'Plugin 0.7.2')
+  assert.ok(line, 'the current version is visible')
+  assert.equal(ui.button('Check for updates').props.disabled, false)
+  assert.equal(ui.notice(), undefined)
+
+  // A GitHub outage on mount leaves the action but no error banner: the card
+  // still works for the sync it was opened for.
+  const offline = setup({ update: 'reject' }); await tick()
+  assert.equal(offline.button('Check for updates').props.disabled, false)
+  assert.equal(offline.find((n) => n.type === 'div' && /offline|Request failed/.test(offline.text(n))), undefined)
+  assert.equal(offline.notice(), undefined)
+})
+
+test('a newer version offers one in-place update, then a reload', async () => {
+  const ui = setup({ update: response({ ok: true, supported: true, current: '0.7.2', latest: '0.7.3', available: true }) })
+  await tick()
+  assert.ok(ui.find((n) => n.type === 'div' && ui.text(n) === 'Plugin 0.7.2 → 0.7.3'))
+  const update = ui.button('Update to 0.7.3')
+  assert.equal(update.props.disabled, false)
+  assert.match(update.props.className, /dcfg-btn-primary/)
+  ui.updateQueue.push(response({ ok: true, accepted: true, from: '0.7.2', to: '0.7.3' }))
+  ui.stateQueue.push(
+    response({ ok: true, update: { status: 'running', from: '0.7.2', to: '0.7.3' } }),
+    response({ ok: true, update: { status: 'done', from: '0.7.2', to: '0.7.3' } }),
+  )
+  update.props.onClick(); await tick()
+  const post = ui.updateCalls.find((c) => c.options?.method === 'POST')
+  assert.ok(post, 'the update is started through the update route')
+  assert.deepEqual(JSON.parse(post.options.body), {})
+  assert.equal(ui.button('Updating…').props.disabled, true)
+  // Sync actions wait while the plugin is being replaced.
+  assert.equal(ui.button('Push').props.disabled, true)
+  // The install unloads the plugin, so the outcome comes from the state route.
+  await tick()
+  assert.equal(ui.stateCalls.length, 1, 'the first poll runs right after the acceptance')
+  assert.equal(ui.stateCalls[0].path, '/api/config-sync/update-state')
+  ui.expire(); await tick(); await tick()
+  assert.equal(ui.notice(), 'Updated to 0.7.3. Reload the page to load the new UI.')
+  const reload = ui.button('Reload page')
+  assert.equal(reload.props.disabled, false)
+  assert.equal(ui.find((n) => n.type === 'button' && ui.text(n) === 'Update to 0.7.3'), undefined)
+})
+
+test('an interrupted update keeps the poll alive and then reports the failure', async () => {
+  const ui = setup({ update: response({ ok: true, supported: true, current: '0.7.2', latest: '0.7.3', available: true }) })
+  await tick()
+  // The first poll hits the unloading plugin, the second finds the outcome.
+  ui.stateQueue.push('reject', response({ ok: true, update: { status: 'failed', from: '0.7.2', to: '0.7.3', message: 'build approval required' } }))
+  ui.button('Update to 0.7.3').props.onClick(); await tick(); await tick()
+  assert.equal(ui.stateCalls.length, 1)
+  ui.expire(); await tick(); await tick()
+  assert.equal(ui.notice(), undefined, 'a failure is not a success notice')
+  const note = ui.find((n) => /dcfg-version-note/.test(String(n.props.className || '')) && /build approval required/.test(ui.text(n)))
+  assert.ok(note, 'the failure reason is shown')
+  assert.match(note.props.className, /dcfg-version-note-warn/)
+  // The card is usable again, and the update can be retried.
+  assert.equal(ui.button('Update to 0.7.3').props.disabled, false)
+  assert.equal(ui.button('Push').props.disabled, false)
+})
+
+test('a failed check can be retried from the version row', async () => {
+  const ui = setup({ update: 'reject' }); await tick()
+  ui.updateQueue.push(response({ ok: true, supported: true, current: '0.7.2', latest: '0.7.2', available: false }))
+  ui.button('Check for updates').props.onClick(); await tick()
+  assert.equal(ui.updateCalls.length, 2)
+  assert.ok(ui.find((n) => n.type === 'div' && ui.text(n) === 'Plugin 0.7.2'))
+  assert.equal(ui.notice(), undefined)
+  // A manual check that fails does report why.
+  ui.updateQueue.push('reject')
+  ui.button('Check for updates').props.onClick(); await tick()
+  assert.ok(ui.find((n) => n.type === 'div' && /offline/.test(ui.text(n))))
+})
+
+test('a local install explains itself instead of offering an update', async () => {
+  const ui = setup({ update: response({ ok: true, supported: false, current: '0.7.2', reason: 'local-install' }) })
+  await tick()
+  assert.ok(ui.find((n) => n.type === 'div' && ui.text(n) === 'Plugin 0.7.2'))
+  const note = ui.find((n) => /dcfg-version-note/.test(String(n.props.className || '')) && /local path/.test(ui.text(n)))
+  assert.ok(note, 'the reason is shown')
+  assert.match(note.props.className, /dcfg-version-note-warn/)
+  assert.equal(ui.find((n) => n.type === 'button' && /Update|Check for updates/.test(ui.text(n))), undefined)
+})
+
+test('a version row speaks Chinese when the client does', async () => {
+  const ui = setup({
+    language: 'zh-CN',
+    update: response({ ok: true, supported: true, current: '0.7.2', latest: '0.7.3', available: true }),
+  })
+  await tick()
+  assert.ok(ui.find((n) => n.type === 'div' && ui.text(n) === '插件 0.7.2 → 0.7.3'))
+  assert.equal(ui.button('更新到 0.7.3').props.disabled, false)
 })

@@ -230,6 +230,15 @@ The card shows the remote, branch, profile and current status. On a new machine,
   `next: dsh plugin --profile <profile> install`. Restart after installing.
 - **Push** accepts a commit message. The UI does not expose force; use `/sync-push --force` when
   needed.
+- **Plugin version and updates.** The card footer shows this plugin's current version and checks the
+  repository's `package.json` on GitHub once, silently, when the card mounts. When a newer release
+  exists the row offers **Update to x.y.z**; the click hands the installation to DSH's own plugin
+  manager, which replaces the running copy in place and rolls the previous one back if the install
+  fails. The card drops out briefly and then offers a page reload. After an in-card update the
+  dependency is pinned to a full commit (`github:owner/repo#<sha>`), which is also what lets DSH's
+  native Plugins page update and roll back later. A local directory or `link:` install gets an
+  explanation instead of a button (updating it would overwrite your checkout), and a failed check
+  (for example offline) shows no error at all — only **Check for updates**.
 - Only one sync runs at a time (one shared lock across windows and tabs). Clicking during a sync
   returns HTTP 409 `E_BUSY` and the card says another sync is running. When you leave the page and
   come back, the card restores the busy state and the last outcome from the host instead of
@@ -411,6 +420,10 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 - The plugin verifies exact Git bytes. If another machine commits with `core.autocrlf=true` and
   rewrites line endings, the remote reports `E_MANIFEST`; re-commit the managed files with
   `core.autocrlf=false`. The plugin's own cache always disables line-ending conversion.
+- The in-card update needs two things: this plugin installed from GitHub, and a DSH host that exposes
+  its plugin manager. It also needs network access to GitHub (the repository's `package.json`, then
+  `git ls-remote` for the branch commit); when either fails the card reports why and sync keeps
+  working.
 
 ## Troubleshooting
 
@@ -432,6 +445,8 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 | `E_CONFIG_BUSY` / `E_CONFIG_SAVE` | A configuration save is already in progress or failed; wait for the plugin to reload and retry, and check higher-priority overrides |
 | `E_CONFIG_TIMEOUT` / `E_TIMEOUT` | A plugin-page request timed out (save 15s / read 90s / sync 10min); retry on a slow network |
 | `E_HTTP` | A plugin-page request failed (route unresponsive or non-JSON response); refresh the page, restart DSH if needed |
+| `E_UPDATE_UNSUPPORTED` / `E_UPDATE_CURRENT` | This installation cannot be updated from the card (local directory, not from GitHub, or no plugin manager on the host), or it is already the newest version |
+| `E_UPDATE_CHECK` / `E_UPDATE_REMOTE` / `E_UPDATE_GIT` | The update check failed: the remote `package.json` or `git ls-remote` did not answer; confirm GitHub is reachable and press **Check for updates** |
 | Git authentication failure | Set up an SSH key or cache HTTPS credentials; the plugin never prompts |
 | Nothing changed after a pull | Restart DSH; `cordis.patch.yml` is composed at boot |
 

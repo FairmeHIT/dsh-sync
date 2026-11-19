@@ -4,6 +4,7 @@ import { formatError, toToolError } from './src/errors.js'
 import { createHttpRoutes } from './src/http.js'
 import { createConfigEditor } from './src/remote-config.js'
 import { pull, pullReport, push, status, testConnection } from './src/sync.js'
+import { checkUpdate, readUpdateState, startUpdate } from './src/update.js'
 import { readActivity } from './src/activity.js'
 import { isLocked } from './src/lock.js'
 
@@ -167,6 +168,15 @@ export function apply(ctx, rawConfig) {
   // bundle still works in headless and CLI contexts without a connection.
   ctx.inject(['connection'], (scope) => {
     if (typeof scope.connection?.fetch?.register !== 'function') return
+    // The plugin manager owns installation and rollback, and arrives with the
+    // web bundles; read it lazily so a host without it still serves the rest.
+    const getManager = () => {
+      try {
+        return typeof ctx.get === 'function' ? ctx.get('pluginManager') : undefined
+      } catch {
+        return undefined
+      }
+    }
     const routes = createHttpRoutes(
       config,
       {
@@ -177,6 +187,9 @@ export function apply(ctx, rawConfig) {
         probe: testConnection,
         isBusy: () => isLocked(resolveDshHome(config)),
         readActivity: () => readActivity(config),
+        checkUpdate: (current) => checkUpdate(current, { getManager }),
+        startUpdate: (current) => startUpdate(current, { getManager }),
+        readUpdateState: (current) => readUpdateState(current),
       },
       createConfigEditor(ctx),
     )
