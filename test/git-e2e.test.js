@@ -365,6 +365,70 @@ test('end-to-end: empty remote and orphan branch', { skip }, async (t) => {
     await assert.rejects(pull(config(root, home)), { code: 'E_REMOTE_EMPTY' })
   })
 
+  await t.test('pull adopts the single profile directory the remote already has', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    await push(config(root, homeA), { message: 'desktop push' })
+
+    // The second machine uses a different profile name, so its own
+    // profiles/web/manifest.json never existed on the remote.
+    const homeB = join(root, 'homeB')
+    const profileDir = join(homeB, 'profiles', 'web')
+    await mkdir(profileDir, { recursive: true })
+    await writeFile(join(profileDir, 'package.json'), pkg())
+    const configB = config(root, homeB, { profile: 'web' })
+
+    const preview = await pullReport(configB)
+    assert.match(preview.text, /adopt/i)
+    assert.match(preview.text, /profiles\/demo/)
+    assert.equal(
+      await readFile(join(profileDir, 'package.json'), 'utf8'),
+      pkg(),
+      'a dry run must not write anything',
+    )
+
+    const text = await pull(configB, { apply: true })
+    assert.match(text, /adopted:/)
+    assert.equal(await readFile(join(profileDir, 'package.json'), 'utf8'), pkg())
+    const state = await readState(configB, 'web')
+    assert.equal(state.channel, 'demo')
+    assert.equal(state.direction, 'pull')
+    assert.match(await status(configB), /No differences/)
+  })
+
+  await t.test('several remote profiles are reported instead of guessed', async () => {
+    const root = await setup()
+    const homeA = await makeMachine(root, 'homeA', {
+      'package.json': pkg(),
+      'cordis.patch.yml': '- insert: []\n',
+    })
+    await push(config(root, homeA), { message: 'demo push' })
+
+    const homeB = join(root, 'homeB')
+    const webDir = join(homeB, 'profiles', 'web')
+    await mkdir(webDir, { recursive: true })
+    await writeFile(join(webDir, 'package.json'), pkg())
+    await writeFile(join(webDir, 'cordis.patch.yml'), '- insert: []\n')
+    await push(config(root, homeB, { profile: 'web' }), { message: 'web push' })
+    assert.deepEqual(
+      (await remoteTree(root)).filter((path) => path.endsWith('manifest.json')).sort(),
+      ['profiles/demo/manifest.json', 'profiles/web/manifest.json'],
+    )
+
+    const homeC = join(root, 'homeC')
+    await mkdir(join(homeC, 'profiles', 'other'), { recursive: true })
+    await writeFile(join(homeC, 'profiles', 'other', 'package.json'), pkg())
+    await assert.rejects(pull(config(root, homeC, { profile: 'other' })), (error) => {
+      assert.equal(error.code, 'E_REMOTE_PROFILE')
+      assert.match(error.message, /demo/)
+      assert.match(error.message, /web/)
+      return true
+    })
+  })
+
   await t.test('a branch absent from the remote starts a new root commit', async () => {
     const root = await setup()
     const home = await makeMachine(root, 'home', {

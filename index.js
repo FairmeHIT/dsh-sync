@@ -3,7 +3,7 @@ import { Config, PACKAGE_NAME, normalizeConfig, resolveDshHome } from './src/con
 import { formatError, toToolError } from './src/errors.js'
 import { createHttpRoutes } from './src/http.js'
 import { createConfigEditor } from './src/remote-config.js'
-import { pull, pullReport, push, status, testConnection } from './src/sync.js'
+import { pull, pullReport, push, status, statusReport, testConnection } from './src/sync.js'
 import { checkUpdate, readUpdateState, startUpdate } from './src/update.js'
 import { readActivity } from './src/activity.js'
 import { isLocked } from './src/lock.js'
@@ -181,6 +181,7 @@ export function apply(ctx, rawConfig) {
       config,
       {
         status,
+        statusReport,
         push,
         pull,
         pullReport,

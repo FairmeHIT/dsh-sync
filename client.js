@@ -61,7 +61,7 @@ window.__ModuleLoader__.load({
           messageHint: '留空则自动生成',
           loading: '正在读取远端状态…',
           empty: '还没有状态。点“刷新”读取。',
-          noRemote: '还没有配置远端。请在“连接设置”中填写仓库地址并保存。',
+          noRemote: '还没有配置远端。请在“更多”里填写仓库地址并保存。',
           advanced: '连接设置',
           output: '状态详情',
           retryConfig: '重试读取配置',
@@ -86,6 +86,15 @@ window.__ModuleLoader__.load({
           updateTimeout: '更新没有按时完成，请刷新页面查看版本。',
           updated: '已更新到 {version}。刷新页面加载新界面。',
           reload: '刷新页面',
+          pull: '拉取',
+          more: '更多',
+          confirm: '确认',
+          noRemoteShort: '未配置远端',
+          pullConfirmTitle: '确认拉取？',
+          pushConfirmTitle: '确认推送？',
+          pullConfirmHint: '以下改动将写入本机；写入前会自动快照，可随时恢复。',
+          pushConfirmHint: '本机 Profile 将写入远端分支；其他机器下次拉取时会收到这些文件。',
+          adoptNote: '会把远端目录 {channel} 映射为本机 Profile {profile}。',
         }
       : {
           title: 'Config sync',
@@ -124,7 +133,7 @@ window.__ModuleLoader__.load({
           messageHint: 'Leave blank to auto-generate',
           loading: 'Reading the remote status…',
           empty: 'No status yet. Choose Refresh.',
-          noRemote: 'No remote configured. Open Connection settings, enter a repository, and save.',
+          noRemote: 'No remote configured. Open More, enter a repository, and save.',
           advanced: 'Connection settings',
           output: 'Status details',
           retryConfig: 'Retry loading configuration',
@@ -149,6 +158,15 @@ window.__ModuleLoader__.load({
           updateTimeout: 'The update did not finish in time. Reload the page to see the version.',
           updated: 'Updated to {version}. Reload the page to load the new UI.',
           reload: 'Reload page',
+          pull: 'Pull',
+          more: 'More',
+          confirm: 'Confirm',
+          noRemoteShort: 'No remote configured',
+          pullConfirmTitle: 'Pull from remote?',
+          pushConfirmTitle: 'Push to remote?',
+          pullConfirmHint: 'These changes will be written to this machine. A snapshot is taken first and can be restored.',
+          pushConfirmHint: "This machine's profile will be written to the remote branch; other machines receive it on their next pull.",
+          adoptNote: "Maps remote directory {channel} to this machine's profile {profile}.",
         }
 
     var CSS = `
@@ -203,6 +221,22 @@ window.__ModuleLoader__.load({
 .dcfg-versionline strong { color:inherit; font-weight:600; }
 .dcfg-version-note { font-size:12px; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); }
 .dcfg-version-note-warn { color:var(--dsw-alias-state-warn-primary, #b7791f); }
+.dcfg-meta { margin:2px 0 0; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dcfg-chip-ok { color:var(--dsw-alias-state-success-primary, #2f9e63); border-color:var(--dsw-alias-state-success-primary, #2f9e63); }
+.dcfg-chip-warn { color:var(--dsw-alias-state-warn-primary, #b7791f); border-color:var(--dsw-alias-state-warn-primary, #b7791f); }
+.dcfg-chip-muted { color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); }
+.dcfg-more { border-top:1px dashed var(--dsw-alias-border-l1, rgba(127,127,127,.22)); }
+.dcfg-more > summary { cursor:pointer; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12.5px; padding:6px 0; }
+.dcfg-more[open] > summary { margin-bottom:8px; }
+.dcfg-morebody { display:flex; flex-direction:column; gap:10px; padding-bottom:6px; }
+.dcfg-moreline { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.dcfg-raw > summary { cursor:pointer; color:var(--dsw-alias-label-secondary, rgba(127,127,127,.85)); font-size:12px; }
+.dcfg-raw > pre { margin:6px 0 0; max-height:240px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.55; padding:10px 12px; border-radius:8px; background:var(--dsw-alias-bg-layer-2, rgba(127,127,127,.06)); }
+.dcfg-modal { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.42); }
+.dcfg-modal-card { width:min(560px, 100%); max-height:80vh; overflow:auto; display:flex; flex-direction:column; gap:10px; padding:16px; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35)); border-radius:12px; background:var(--dsw-alias-bg-layer-1, #fff); box-shadow:0 18px 48px rgba(0,0,0,.28); }
+.dcfg-modal-title { margin:0; font-size:14px; font-weight:600; }
+.dcfg-modal-actions { display:flex; justify-content:flex-end; gap:8px; }
+.dcfg-adopt { color:var(--dsw-alias-state-warn-primary, #b7791f); font-size:12.5px; }
 @media (max-width:560px) {
   .dcfg-head { flex-direction:column; }
   .dcfg-facts { grid-template-columns:1fr; }
@@ -313,6 +347,7 @@ window.__ModuleLoader__.load({
         remoteHidden: false,
         saving: false,
         configError: null,
+        dialog: null,
         update: null,
       })
       var view = state[0]
@@ -378,14 +413,8 @@ window.__ModuleLoader__.load({
         [load],
       )
 
-      // One silent version check per mount: the reader sees whether a newer
-      // release exists without asking, and an offline host shows nothing.
-      React.useEffect(
-        function () {
-          checkUpdate(true)
-        },
-        [],
-      )
+      // The version check is lazy: the collapsed card stays quiet until the
+      // reader opens "More", so a normal visit never spends a GitHub request.
 
       async function run(path, body, action) {
         setView(function (current) {
@@ -699,28 +728,136 @@ window.__ModuleLoader__.load({
         )
       }
 
+      // Pull is two steps by design: this click only compares. The dialog's
+      // confirm is the only request that writes, and Cancel sends nothing.
+      async function openPull() {
+        if (view.busy || view.loading) return
+        setView(function (current) {
+          return { ...current, busy: true, busyAction: 'preview', error: null, notice: '', result: '' }
+        })
+        try {
+          var data = await request(ROUTES.pull, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ apply: false }),
+            timeoutMs: 600000,
+          })
+          var text = data.text || ''
+          var noChanges = data.upToDate === true || /^Already up to date(?:; nothing to commit|\.)\.?$/im.test(text)
+          if (noChanges) {
+            setView(function (current) { return { ...current, busy: false, busyAction: '', notice: copy.upToDate } })
+            await load(true, false)
+            return
+          }
+          setView(function (current) {
+            return {
+              ...current,
+              busy: false,
+              busyAction: '',
+              dialog: {
+                kind: 'pull',
+                text: previewBody(text) || text,
+                channel: String(data.channel || ''),
+                profile: String(data.profile || (current.data && current.data.profile) || ''),
+                adopted: data.adopted === true,
+              },
+            }
+          })
+        } catch (error) {
+          setView(function (current) {
+            if (error && error.code === 'E_BUSY') {
+              return { ...current, busy: false, busyAction: '', notice: copy.busyElsewhere, error: null }
+            }
+            return { ...current, busy: false, busyAction: '', error: error, notice: '' }
+          })
+        }
+      }
+
+      // Push has nothing to fetch, so its confirmation opens at once; the
+      // dialog's confirm is the only request that touches the remote.
+      function openPush() {
+        if (view.busy || view.loading) return
+        setView(function (current) {
+          return {
+            ...current,
+            error: null,
+            notice: '',
+            dialog: {
+              kind: 'push',
+              text: '',
+              channel: '',
+              profile: String((current.data && current.data.profile) || ''),
+              adopted: false,
+            },
+          }
+        })
+      }
+
+      function closeDialog() {
+        setView(function (current) { return { ...current, dialog: null } })
+      }
+
+      async function confirmDialog() {
+        var dialog = view.dialog
+        if (!dialog || view.busy) return
+        var pull = dialog.kind === 'pull'
+        setView(function (current) {
+          return { ...current, busy: true, busyAction: pull ? 'apply' : 'push', error: null, notice: '', result: '' }
+        })
+        try {
+          var data = await request(pull ? ROUTES.pull : ROUTES.push, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(pull ? { apply: true } : { message: view.message }),
+            timeoutMs: 600000,
+          })
+          var text = data.text || ''
+          var installCommand = data.needsInstall === true
+            ? 'dsh plugin --profile ' + (String(data.profile || (view.data && view.data.profile) || '').trim() || 'desktop') + ' install'
+            : ''
+          var notice = pull
+            ? (installCommand ? copy.installNext.replace('{command}', installCommand) : copy.applied)
+            : copy.pushDone
+          setView(function (current) {
+            return { ...current, busy: false, busyAction: '', result: text, notice: notice, dialog: null, message: '', error: null }
+          })
+          await load(true, false)
+        } catch (error) {
+          setView(function (current) {
+            if (error && error.code === 'E_BUSY') {
+              return { ...current, busy: false, busyAction: '', notice: copy.busyElsewhere, error: null }
+            }
+            return { ...current, busy: false, busyAction: '', error: error, notice: '' }
+          })
+        }
+      }
+
       var data = view.data || {}
-      var updating = view.update && view.update.phase === 'updating'
-      var disabled = view.busy || view.loading || view.saving || updating
-      // A stalled fetch must never lock the user out of Refresh: only a sync
-      // action or config save disables it, so a hung status read can be retried.
-      var refreshDisabled = view.busy || view.saving
+      var updating = !!(view.update && view.update.phase === 'updating')
+      var disabled = !!(view.busy || view.loading || view.saving || updating)
+      var refreshDisabled = !!(view.busy || view.saving)
       var statusText = view.result || data.text || ''
       var error = view.error
       var hint = error && error.code === 'E_CONFIG' ? copy.noRemote : ''
-      var verdict = view.busy
-        ? { kind: 'muted', text: busyLabel(view.busyAction) }
-        : view.loading && !data.text
-          ? { kind: 'muted', text: copy.loading }
-          : error && !data.text
-            ? { kind: 'warn', text: copy.statusUnavailable }
-            : data.upToDate === true
-              ? { kind: 'ok', text: copy.inSync }
-              : data.upToDate === false
-                ? { kind: 'warn', text: copy.differences }
-                : { kind: 'muted', text: copy.ready }
+      var profile = String(data.profile || view.draft.profile || '')
+      var channel = String(data.channel || '')
+      var remote = String(data.remote || view.draft.remote || '')
+      var branch = String(data.branch || view.draft.branch || 'main')
+      var meta = remote || copy.noRemoteShort
+      meta += ' · ' + branch
+      if (profile) meta += ' · ' + copy.profile + ' ' + profile
+      if (channel && channel !== profile) meta += ' → ' + channel
+      var chipKind = view.busy || view.loading
+        ? 'muted'
+        : error && !data.text
+          ? 'warn'
+          : data.upToDate === true
+            ? 'ok'
+            : data.upToDate === false
+              ? 'warn'
+              : 'muted'
       var chipText = view.busy
-        ? copy.syncBusy
+        ? busyLabel(view.busyAction)
         : view.loading
           ? '…'
           : data.upToDate === true
@@ -728,175 +865,164 @@ window.__ModuleLoader__.load({
             : data.upToDate === false
               ? copy.changes
               : copy.status
+
+      function dialogView(box) {
+        var pull = box.kind === 'pull'
+        var title = pull ? copy.pullConfirmTitle : copy.pushConfirmTitle
+        return h(
+          'div',
+          {
+            className: 'dcfg-modal',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-label': title,
+            onClick: function (event) {
+              if (event.target === event.currentTarget) closeDialog()
+            },
+          },
+          h(
+            'div',
+            { className: 'dcfg-modal-card' },
+            h('h3', { className: 'dcfg-modal-title' }, title),
+            h('p', { className: 'dcfg-hint' }, pull ? copy.pullConfirmHint : copy.pushConfirmHint),
+            pull ? h('pre', { className: 'dcfg-preview-text' }, box.text) : null,
+            pull && box.channel && box.channel !== box.profile
+              ? h('p', { className: 'dcfg-adopt' }, copy.adoptNote.replace('{channel}', box.channel).replace('{profile}', box.profile))
+              : null,
+            !pull
+              ? h(
+                  'label',
+                  { className: 'dcfg-field' },
+                  h('span', null, copy.message),
+                  h('input', {
+                    type: 'text',
+                    className: 'dcfg-input',
+                    'aria-label': copy.message,
+                    maxLength: 500,
+                    placeholder: copy.messageHint,
+                    value: view.message,
+                    autoComplete: 'off',
+                    spellCheck: false,
+                    disabled: view.busy,
+                    onChange: function (event) {
+                      var value = event.target.value
+                      setView(function (current) { return { ...current, message: value } })
+                    },
+                  }),
+                )
+              : null,
+            h(
+              'div',
+              { className: 'dcfg-modal-actions' },
+              h('button', { type: 'button', className: 'dcfg-btn', disabled: view.busy, onClick: closeDialog }, copy.cancel),
+              h(
+                'button',
+                { type: 'button', className: 'dcfg-btn dcfg-btn-primary', disabled: view.busy, onClick: confirmDialog },
+                view.busy ? (pull ? copy.pullBusy : copy.pushBusy) : copy.confirm,
+              ),
+            ),
+          ),
+        )
+      }
+
+      var dialog = view.dialog
       return h(
         'div',
         { className: 'dcfg-root' },
 
-        h('div', { className: 'dcfg-head' },
-          h('div', { className: 'dcfg-headtext' },
+        h(
+          'div',
+          { className: 'dcfg-head' },
+          h(
+            'div',
+            { className: 'dcfg-headtext' },
             h('h2', { className: 'dcfg-title' }, copy.title),
-            h('div', { className: 'dcfg-subtitle' }, copy.subtitle),
+            h('div', { className: 'dcfg-meta', title: copy.subtitle }, meta),
           ),
-          h('span', { className: 'dcfg-chip' }, chipText),
+          h('span', { className: 'dcfg-chip dcfg-chip-' + chipKind }, chipText),
         ),
 
-        view.notice
-          ? h('div', { role: 'status', className: 'dcfg-notice dcfg-notice-ok' }, view.notice)
-          : null,
-
+        view.notice ? h('div', { role: 'status', className: 'dcfg-notice dcfg-notice-ok' }, view.notice) : null,
         error
-          ? h('div', { role: 'alert', className: 'dcfg-notice dcfg-notice-error' },
+          ? h(
+              'div',
+              { role: 'alert', className: 'dcfg-notice dcfg-notice-error' },
               h('strong', null, copy.error + ': '),
-              (error.code ? error.code + ' — ' : '') + error.message,
-              hint ? h('div', { className: 'dcfg-hint' }, hint) : null,
+              (error && error.message) || String(error),
             )
           : null,
 
-        h('section', { className: 'dcfg-card' },
-          h('div', { className: 'dcfg-verdict dcfg-verdict-' + verdict.kind },
-            h('span', { className: 'dcfg-dot', 'aria-hidden': 'true' }),
-            h('span', null, verdict.text),
+        h(
+          'div',
+          { className: 'dcfg-actions' },
+          h(
+            'button',
+            { type: 'button', className: 'dcfg-btn dcfg-btn-primary', disabled: disabled, onClick: openPull },
+            view.busy && view.busyAction === 'preview' ? copy.pullBusy : copy.pull,
           ),
-          h('div', { className: 'dcfg-facts' },
-            fact(copy.remote, data.remote),
-            fact(copy.branch, data.branch),
-            fact(copy.profile, data.profile),
-          ),
-          versionRow(),
-          h('div', { className: 'dcfg-actions' },
-            h('button', {
-              type: 'button',
-              className: 'dcfg-btn',
-              disabled: refreshDisabled,
-              onClick: function () { load(false) },
-            }, copy.refresh),
-            h('button', {
-              type: 'button',
-              className: 'dcfg-btn',
-              disabled: disabled,
-              onClick: function () { run(ROUTES.probe, {}, 'probe') },
-            }, view.busyAction === 'probe' ? copy.testBusy : copy.test),
-          ),
-        ),
-
-        h('section', { className: 'dcfg-card' },
-          h('div', { className: 'dcfg-cardtitle' }, copy.syncTitle),
-          h('div', { className: 'dcfg-syncgrid' },
-
-            h('div', { className: 'dcfg-section' },
-              h('div', { className: 'dcfg-sectiontitle' }, copy.pullTitle),
-              h('div', { className: 'dcfg-hint' }, copy.pullHint),
-              h('div', { className: 'dcfg-actions' },
-                h('button', {
-                  type: 'button',
-                  className: 'dcfg-btn',
-                  disabled: disabled,
-                  onClick: function () { run(ROUTES.pull, { apply: false }, 'preview') },
-                }, view.busyAction === 'preview' ? copy.pullBusy : copy.preview),
-              ),
-              view.preview
-                ? h('div', { className: 'dcfg-preview' },
-                    h('div', { className: 'dcfg-preview-head' }, copy.previewTitle),
-                    h('div', { className: 'dcfg-preview-text' }, view.preview.text),
-                    h('div', { className: 'dcfg-hint' }, copy.applyHint),
-                    h('div', { className: 'dcfg-actions' },
-                      h('button', {
-                        type: 'button',
-                        className: 'dcfg-btn dcfg-btn-primary',
-                        disabled: disabled,
-                        onClick: function () { run(ROUTES.pull, { apply: true }, 'apply') },
-                      }, view.busyAction === 'apply' ? copy.pullBusy : copy.apply),
-                      h('button', {
-                        type: 'button',
-                        className: 'dcfg-btn',
-                        disabled: disabled,
-                        onClick: function () {
-                          setView(function (current) { return { ...current, preview: null, notice: '', error: null } })
-                        },
-                      }, copy.cancel),
-                    ),
-                  )
-                : null,
-            ),
-
-            h('div', { className: 'dcfg-section' },
-              h('div', { className: 'dcfg-sectiontitle' }, copy.pushTitle),
-              h('div', { className: 'dcfg-hint' }, copy.pushHint),
-              h('div', { className: 'dcfg-actions' },
-                h('button', {
-                  type: 'button',
-                  className: 'dcfg-btn dcfg-btn-primary',
-                  disabled: disabled,
-                  onClick: function () { run(ROUTES.push, { message: view.message }, 'push') },
-                }, view.busyAction === 'push' ? copy.pushBusy : copy.push),
-              ),
-              h('details', { className: 'dcfg-details' },
-                h('summary', null, copy.message),
-                h('input', {
-                  type: 'text',
-                  'aria-label': copy.message,
-                  className: 'dcfg-input',
-                  value: view.message,
-                  maxLength: 500,
-                  placeholder: copy.messageHint,
-                  disabled: disabled,
-                  onChange: function (event) {
-                    var value = event.target.value
-                    setView(function (current) { return { ...current, message: value } })
-                  },
-                }),
-              ),
-            ),
-
-          ),
+          h('button', { type: 'button', className: 'dcfg-btn dcfg-btn-primary', disabled: disabled, onClick: openPush }, copy.push),
         ),
 
         view.busy
-          ? h('progress', {
-              'aria-label': busyLabel(view.busyAction),
-              className: 'dcfg-progress',
-            })
+          ? h('div', { className: 'dcfg-progress', role: 'progressbar', 'aria-label': busyLabel(view.busyAction) }, busyLabel(view.busyAction))
           : null,
 
-        h('details', {
-          className: 'dcfg-details',
-          open: view.configOpen,
-          onToggle: function (event) {
-            var open = Boolean(event && event.target && event.target.open)
-            setView(function (current) { return { ...current, configOpen: open } })
+        h(
+          'details',
+          {
+            className: 'dcfg-more',
+            open: view.configOpen,
+            onToggle: function (event) {
+              var open = !!(event.target && event.target.open)
+              setView(function (current) { return { ...current, configOpen: open } })
+              if (open && !view.update) checkUpdate(true)
+            },
           },
-        },
-          h('summary', null, copy.advanced),
-          h('div', { className: 'dcfg-advbody' },
-            h('div', { className: 'dcfg-hint' }, copy.configWarning),
+          h('summary', { className: 'dcfg-more-summary' }, copy.more),
+          h(
+            'div',
+            { className: 'dcfg-morebody' },
+            hint ? h('p', { className: 'dcfg-hint' }, hint) : null,
+            h('p', { className: 'dcfg-hint' }, copy.configWarning),
             configField('remote'),
             configField('branch'),
             configField('profile'),
-            view.remoteHidden ? h('div', { className: 'dcfg-hint dcfg-warn' }, copy.hiddenRemote) : null,
-            h('div', { className: 'dcfg-actions' },
+            view.remoteHidden ? h('p', { className: 'dcfg-warn' }, copy.hiddenRemote) : null,
+            h(
+              'div',
+              { className: 'dcfg-moreline' },
               !view.configReady
-                ? h('button', {
-                    type: 'button',
-                    className: 'dcfg-btn',
-                    disabled: disabled || view.configLoading,
-                    onClick: loadConfig,
-                  }, copy.retryConfig)
+                ? h('button', { type: 'button', className: 'dcfg-btn', disabled: view.saving, onClick: loadConfig }, copy.retryConfig)
                 : null,
-              h('button', {
-                type: 'button',
-                className: 'dcfg-btn',
-                disabled: disabled || view.configLoading || !view.configReady || (view.remoteHidden && !view.draft.remote.trim()),
-                onClick: saveConfig,
-              }, view.saving ? copy.saving : copy.save),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dcfg-btn dcfg-btn-primary',
+                  disabled: view.saving || view.configLoading || !view.configReady || disabled || (view.remoteHidden && !String(view.draft.remote || '').trim()),
+                  onClick: saveConfig,
+                },
+                view.saving ? copy.saving : copy.save,
+              ),
             ),
             view.configError ? h('div', { role: 'alert', className: 'dcfg-notice dcfg-notice-error' }, view.configError) : null,
+            h(
+              'div',
+              { className: 'dcfg-moreline' },
+              h('button', { type: 'button', className: 'dcfg-btn', disabled: refreshDisabled, onClick: function () { load(false, false) } }, copy.refresh),
+              h('button', { type: 'button', className: 'dcfg-btn', disabled: view.busy || view.saving, onClick: function () { run(ROUTES.probe, {}, 'probe') } }, copy.test),
+            ),
+            versionRow(),
+            h(
+              'details',
+              { className: 'dcfg-raw' },
+              h('summary', null, copy.output),
+              h('pre', null, statusText || (view.loading ? copy.loading : copy.empty)),
+            ),
           ),
         ),
 
-        h('details', { className: 'dcfg-details' },
-          h('summary', null, copy.output),
-          h('pre', { className: 'dcfg-pre' }, statusText || (view.loading ? copy.loading : copy.empty)),
-        ),
+        dialog ? dialogView(dialog) : null,
       )
     }
 

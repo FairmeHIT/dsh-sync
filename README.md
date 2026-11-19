@@ -188,22 +188,20 @@ dsh plugin --profile desktop add dsh-config-git-sync
 - **设置 → 配置同步**：完整的状态与操作卡片，适合日常使用。
 - 侧边栏 **插件** → `dsh-config-git-sync` 的 bundle 页面：同一张卡片，方便从插件详情进入。
 
-卡片会显示远端、分支、profile 和当前状态。新机器无需先手写 YAML：展开卡片的 **连接设置**，填写私有仓库地址、分支（默认 `main`）和 profile（留空自动检测），点击 **保存配置**，等待回读确认。仓库地址不能包含密码或 Token；请预先配置 Git 凭据管理器或 SSH。连接设置和完整状态文本默认折叠，首次使用或配置读取失败时会自动展开。
+卡片默认只保留必要内容：一行概要（远端 · 分支 · profile）、**拉取** 和 **推送** 两个按钮，以及操作结果提示。连接设置、刷新、测试连接、版本与完整状态文本都收在 **更多** 里，默认折叠；只有远端未配置或配置读取失败时自动展开。新机器无需先手写 YAML：展开 **更多**，填写私有仓库地址、分支（默认 `main`）和 profile（留空自动检测），点击 **保存配置**，等待回读确认。仓库地址不能包含密码或 Token；请预先配置 Git 凭据管理器或 SSH。
 
 **保存位置**：UI 通过 DSH 配置编辑器保存到当前运行 profile 的配置覆盖层，保留其他配置字段。这个文件也属于同步范围，但本机 `- id: config-sync` 那一行被当作机器本地数据：Push 时剔除、Pull 应用后并回，所以保存的仓库地址不会因为 Pull 被清空。Pull 输出里会表示 `preserved: config-sync row (this machine)`，卡片也会在应用后提示。若已有 home/命令行配置覆盖当前字段，编辑器会拒绝保存，界面会报告失败，不会修改高优先级配置。
 
-- 卡片显示远端、分支、profile 和当前状态；**刷新** 只读，不会写盘。
-- **测试连接** 会向远端写入并随后删除一个 `.config-sync-probe` 标记文件，验证仓库可读可写，
-  不触碰任何同步内容；测试通过后输出 `Connection test passed`。
-- **预览 Pull** 等价于 `/sync-pull`，只显示差异；预览会直接展开在卡片里，确认后才出现 **应用 Pull**（或 **取消**）。
-- **应用 Pull** 先写快照，再覆盖本地受管文件。因为只有在预览后才出现，不再弹单独的确认框；本机 `config-sync` 行会被保留。
+- 点击 **拉取** 先做一次只读预览，随后弹出确认框：列出将被覆盖的文件、快照说明，以及远端目录到本机 profile 的映射（如果有）。只有点 **确认** 才写盘；取消不会发出写入请求。
+- 点击 **推送** 立即弹出确认框（可填写提交信息），确认后才推送；取消不会发出写入请求。UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
+- **刷新** 与 **测试连接** 在 **更多** 里：刷新只读；测试连接会向远端写入并随后删除一个 `.config-sync-probe` 标记文件，验证仓库可读可写，不触碰任何同步内容，通过后输出 `Connection test passed`。
+- **应用 Pull** 先写快照，再覆盖本地受管文件；本机 `config-sync` 行会被保留。
 - 插件依赖默认自动安装（`reconcile: install`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
   会在 profile 目录里运行 `pnpm install`（优先用 DSH 自带的 node+pnpm 运行时，其次 PATH 上的 pnpm/corepack/npm 兜底），
   成功后输出 `packages: installed with <工具>`。
   设为 `none` 时只写文件，输出会明确写 `packages: manifest changed but dependencies were not installed`
   和 `next: dsh plugin --profile <profile> install`；执行后再重启。
-- **Push** 可填写提交信息；UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
-- **插件版本与更新**：卡片底部显示本插件当前版本，打开卡片时会静默检查一次 GitHub 上的
+- **插件版本与更新**：版本行在 **更多** 里，第一次展开 **更多** 时才静默检查 GitHub 上的
   `package.json`。有新版本时出现 **更新到 x.y.z**，点击后交给 DSH 自带的插件管理器原地重装
   （失败自动回滚到旧版本），卡片会短暂中断，完成后提示刷新页面。更新后本机依赖会被固定到完整
   commit（`github:owner/repo#<sha>`），此后 DSH 原生插件页也能显示更新并回滚。用本地目录或
@@ -297,6 +295,7 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 **pull 的规则**：
 
 - `/sync-pull` 只预览，不写盘。
+- 远端只有一个 profile、且与本机 profile 名不同时，首次 pull 会提议把该远端目录映射为本机 profile（记在 `state.json` 的 `channel`，不改配置）；远端有多个 profile 时不猜，报 `E_REMOTE_PROFILE` 并列出可选目录。
 - `/sync-pull apply` 会用远端覆盖本地受管文件；只会删除**本机上次同步过**、且远端已不存在的受管文件。
   本机从未同步过的本地文件（例如首次 pull 时本地已有的 `cordis.patch.yml`）会保留并提示 `kept locally`。
   写之前先做快照。
@@ -381,7 +380,8 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 | `E_PUSH_REJECTED` | 远端在 fetch 和 push 之间又前进了；重新 `/sync-status`，pull 后再 push |
 | `E_MANIFEST` | 远端 manifest 损坏、版本不支持、文件缺失或哈希/大小不匹配 |
 | `E_PATH` | 仓库里出现了允许列表之外或类型不安全的路径；插件拒绝处理 |
-| `E_REMOTE_EMPTY` | 远端还没有本 profile 的 manifest；先在有配置的机器上 push |
+| `E_REMOTE_EMPTY` | 远端分支还没有任何 profile 的 manifest；先在有配置的机器上 push |
+| `E_REMOTE_PROFILE` | 远端有配置但目录名与本机 profile 不一致、且不止一个无法自动映射；按提示把 `profile` 改成远端目录名，或在本机 push 发布自己的目录 |
 | `E_APPLY` | pull 写入或校验失败；本地受管文件已回滚，检查磁盘空间/权限后重试 |
 | `E_GIT` / `E_CANCELLED` | Git 执行失败或被取消；检查 Git 安装、网络、认证和日志 |
 | `E_CONFIG_INPUT` | 插件页面里填写的 remote/branch/profile 不合法；改为不含凭据的 HTTPS/SSH 地址或服务器可信的本地路径 |

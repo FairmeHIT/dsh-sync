@@ -132,9 +132,22 @@ export function createHttpRoutes(config, operations, editor) {
       return json({ ok: true, ...identity(config), busy: true, activity, text: '' })
     }
     try {
-      const text = await operations.status(config)
+      // statusReport() also names the effective profile/channel and, for a
+      // remote that holds other profile directories, the names it found.
+      const run = operations.statusReport ?? operations.status
+      const report = await run(config)
+      const text = typeof report === 'string' ? report : String(report?.text ?? '')
       const activity = operations.readActivity ? await operations.readActivity() : null
-      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text), activity })
+      const details =
+        typeof report === 'string'
+          ? {}
+          : {
+              profile: report?.profile,
+              channel: report?.channel,
+              remoteProfiles: report?.remoteProfiles,
+              adopted: report?.adopted === true,
+            }
+      return json({ ok: true, ...identity(config), text, upToDate: upToDate(text), activity, ...details })
     } catch (error) {
       return failure(config, error)
     }
@@ -169,6 +182,9 @@ export function createHttpRoutes(config, operations, editor) {
         text,
         upToDate: upToDate(text),
         needsInstall: typeof report === 'string' ? false : report?.needsInstall === true,
+        profile: typeof report === 'string' ? undefined : report?.profile,
+        channel: typeof report === 'string' ? undefined : report?.channel,
+        adopted: typeof report === 'string' ? undefined : report?.adopted === true,
       })
     } catch (error) {
       return failure(config, error, error instanceof BadRequest ? 400 : 200)

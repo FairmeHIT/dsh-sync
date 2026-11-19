@@ -46,6 +46,9 @@ export async function readState(config, profile) {
   }
   return {
     profile,
+    // Remote storage key adopted on an earlier pull. Older records have no
+    // channel and therefore keep syncing the directory named like the profile.
+    channel: typeof entry.channel === 'string' && entry.channel ? entry.channel : null,
     remote: entry.remote,
     branch: entry.branch,
     commit: entry.commit,
@@ -59,7 +62,7 @@ export async function readState(config, profile) {
  * Persist the last-sync record after a successful push or pull. Other profiles
  * in the same Harness home are preserved.
  */
-export async function writeState(config, profile, { commit, files, direction }) {
+export async function writeState(config, profile, { commit, files, direction, channel = null }) {
   const dshHome = resolveDshHome(config)
   const file = statePath(dshHome)
   let raw = null
@@ -77,6 +80,9 @@ export async function writeState(config, profile, { commit, files, direction }) 
     direction: direction === 'pull' ? 'pull' : 'push',
     syncedAt: new Date().toISOString(),
     files: { ...files },
+    // Only recorded when the remote directory differs from the local profile
+    // name, so unchanged machines keep the historical state shape.
+    ...(typeof channel === 'string' && channel && channel !== profile ? { channel } : {}),
   }
   await ensureDir(join(dshHome, 'config-sync'))
   await writeFileAtomic(file, `${JSON.stringify({ schemaVersion: STATE_VERSION, profiles }, null, 2)}\n`, {

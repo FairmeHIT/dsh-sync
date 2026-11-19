@@ -209,29 +209,22 @@ After restarting DSH there are two entry points:
 - Sidebar **Plugins** → the `dsh-config-git-sync` bundle page: the same card, reachable from the
   plugin detail page.
 
-The card shows the remote, branch, profile and current status. On a new machine, open **Connection settings**, enter the private repository URL, branch (default `main`) and profile (blank for auto-detection), then choose **Save configuration** and wait for effective readback verification. URLs containing passwords or tokens are rejected; configure a Git credential helper or SSH beforehand. Connection settings and the full status text stay collapsed until needed, and open automatically on first run or when configuration cannot be loaded.
+The card stays minimal by default: one meta line (remote · branch · profile), **Pull** and **Push**, and the outcome notice. Connection settings, refresh/test connection, version and the full status text live under **More**, collapsed; they open automatically only when no remote is configured or configuration cannot be loaded. On a new machine, open **More**, enter the private repository URL, branch (default `main`) and profile (blank for auto-detection), then choose **Save configuration** and wait for effective readback verification. URLs containing passwords or tokens are rejected; configure a Git credential helper or SSH beforehand.
 
 **Storage:** the UI uses DSH's configuration editor to save in the running profile's configuration overlay, preserving unrelated fields. That file is also managed by sync, but this machine's `- id: config-sync` row is treated as machine-local data: it is stripped on push and merged back after a Pull applies, so the saved repository URL is not cleared by Pull. The pull output reports `preserved: config-sync row (this machine)` and the card says so after applying. If a home or command-line overlay overrides the edited fields, the editor rejects the save; it does not rewrite higher-priority configuration.
 
-- The card shows the remote, branch, profile and current status. **Refresh** is read-only.
-- **Test connection** writes and then removes a `.config-sync-probe` marker file on the remote to
-  prove the repository is readable and writable; it never touches synced content. A passing test
-  prints `Connection test passed`.
-- **Preview pull** is the same as `/sync-pull`; it writes nothing. The card shows the dry-run diff
-  inline and only then offers **Apply pull** (or **Cancel**).
-- **Apply pull** writes a snapshot first, then overwrites managed local files. Because it only
-  appears after reviewing the preview, no separate browser confirmation is needed. This machine's
-  `config-sync` row is preserved.
+- **Pull** first runs a read-only preview, then opens a confirmation dialog listing the files it will overwrite, the snapshot note, and (when applicable) the remote-directory to local-profile mapping. Nothing is written until **Confirm**; **Cancel** sends no write request.
+- **Push** opens its confirmation dialog immediately (with an optional commit message) and pushes only after **Confirm**; cancel sends no request. The UI does not expose force; use `/sync-push --force` when needed.
+- **Refresh** and **Test connection** live under **More**: refresh is read-only; test connection writes and then removes a `.config-sync-probe` marker file on the remote, never touching synced content, and prints `Connection test passed`.
+- **Apply pull** writes a snapshot first, then overwrites managed local files. This machine's `config-sync` row is preserved.
 - Apply pull installs dependencies by default (`reconcile: install`). When the pull changed `package.json`,
   a lockfile or the plugin list, the plugin runs `pnpm install` (the DSH-bundled node+pnpm runtime first,
   then pnpm/corepack/npm from PATH) in the profile
   directory and reports `packages: installed with <tool>`. With `reconcile: none` the output instead states
   `packages: manifest changed but dependencies were not installed` and
   `next: dsh plugin --profile <profile> install`. Restart after installing.
-- **Push** accepts a commit message. The UI does not expose force; use `/sync-push --force` when
-  needed.
-- **Plugin version and updates.** The card footer shows this plugin's current version and checks the
-  repository's `package.json` on GitHub once, silently, when the card mounts. When a newer release
+- **Plugin version and updates.** The version row lives under **More** and checks the repository's
+  `package.json` on GitHub once, silently, the first time **More** is opened. When a newer release
   exists the row offers **Update to x.y.z**; the click hands the installation to DSH's own plugin
   manager, which replaces the running copy in place and rolls the previous one back if the install
   fails. The card drops out briefly and then offers a page reload. After an in-card update the
@@ -330,6 +323,10 @@ steps 1–2 in the second prompt.
 **Pull rules**:
 
 - `/sync-pull` is a dry run.
+- When the remote has exactly one profile directory and its name differs from this machine's profile,
+  the first pull offers to map that directory onto the local profile (recorded as `channel` in
+  `state.json`; configuration is unchanged). Several remote profiles are never guessed: the pull
+  reports `E_REMOTE_PROFILE` and lists the available directories.
 - `/sync-pull apply` overwrites local managed files and deletes only managed files this machine
   previously synced and that are now absent remotely. A local file this machine never synced (for
   example a local `cordis.patch.yml` during a first pull) is kept and reported as `kept locally`.
@@ -438,7 +435,8 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 | `E_PUSH_REJECTED` | The remote moved between fetch and push; run `/sync-status` again, pull, then push |
 | `E_MANIFEST` | Corrupt or unsupported remote manifest, missing file, or a hash/size mismatch |
 | `E_PATH` | The repository contains a path outside the allowlist or an unsafe file type; the plugin refuses it |
-| `E_REMOTE_EMPTY` | The remote has no manifest for this profile yet; push from a configured machine first |
+| `E_REMOTE_EMPTY` | The remote branch has no profile manifest yet; push from a configured machine first |
+| `E_REMOTE_PROFILE` | The remote has configuration under other profile directories and more than one cannot be mapped automatically; rename `profile` as suggested, or push from this machine to publish its own directory |
 | `E_APPLY` | A pull write or verification failed; managed files were rolled back, so check disk space and permissions, then retry |
 | `E_GIT` / `E_CANCELLED` | Git failed or the operation was cancelled; check the Git installation, network, authentication and logs |
 | `E_CONFIG_INPUT` | The remote/branch/profile typed in the plugin page is invalid; use a credential-free HTTPS/SSH URL or a server-trusted local path |

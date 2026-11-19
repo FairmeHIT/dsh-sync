@@ -41,6 +41,7 @@ import {
   detectProfile,
   deviceId,
   deviceInfo,
+  isValidProfileName,
   nowStamp,
   pathExists,
   readDshVersion,
@@ -71,6 +72,28 @@ function managedSet(config, profile) {
   return set
 }
 
+/**
+ * Directory name used inside the Git repository. Normally it is this machine's
+ * profile name; a machine that migrated from a differently named profile adopts
+ * the remote directory on its first pull and remembers it in state.channel.
+ */
+function syncChannel(ctx, state = null) {
+  const name = state?.channel
+  return typeof name === 'string' && isValidProfileName(name) ? name : ctx.profile
+}
+
+/** Profiles that already have a manifest on the remote branch. */
+async function remoteProfileNames(ctx, work, rev, signal) {
+  const entries = await treeEntries(ctx.config, work, rev, 'profiles/', signal)
+  const names = new Set()
+  for (const entry of entries) {
+    if (entry.type !== 'blob') continue
+    const match = /^profiles\/([^/]+)\/manifest\.json$/.exec(entry.path)
+    if (match && isValidProfileName(match[1])) names.add(match[1])
+  }
+  return [...names].sort()
+}
+
 function shaMap(files) {
   const out = {}
   for (const [path, entry] of Object.entries(files ?? {})) out[path] = entry.sha256
@@ -83,8 +106,8 @@ function shaMap(files) {
  * after a Pull. Slice through a latin1 view so every other byte round-trips
  * unchanged, including CRLF and non-ASCII content.
  */
-function withoutConnectionRow(ctx, files, manifest) {
-  const path = `profiles/${ctx.profile}/${CONNECTION_FILE}`
+function withoutConnectionRow(ctx, files, manifest, channel = ctx.profile) {
+  const path = `profiles/${channel}/${CONNECTION_FILE}`
   const data = files.get(path)
   if (!data) return { files, manifest }
   const stripped = Buffer.from(stripConnectionRow(data.toString('latin1'), PLUGIN_ID), 'latin1')
@@ -96,28 +119,28 @@ function withoutConnectionRow(ctx, files, manifest) {
 }
 
 /** This machine's own connection row, or null when it does not have one. */
-function localConnectionRow(ctx, local) {
-  const data = local.files.get(`profiles/${ctx.profile}/${CONNECTION_FILE}`)
+function localConnectionRow(ctx, local, channel = ctx.profile) {
+  const data = local.files.get(`profiles/${channel}/${CONNECTION_FILE}`)
   if (!data) return null
   return rowText(data.toString('latin1'), PLUGIN_ID)
 }
 
-async function localState(ctx, { requirePackage = false } = {}) {
+async function localState(ctx, { requirePackage = false, channel = ctx.profile } = {}) {
   const files = await readLocalFiles(
     ctx.profileDir,
-    ctx.profile,
+    channel,
     ctx.config.includeLockfile,
     ctx.config.includeWorkspace,
   )
   if (requirePackage) requirePackageJson(files, ctx.profileDir)
   const id = await deviceId(ctx.dshHome)
   const manifest = buildManifest({
-    profile: ctx.profile,
+    profile: channel,
     files,
     dshVersion: await readDshVersion(),
     device: deviceInfo(id),
   })
-  const normalized = withoutConnectionRow(ctx, files, manifest)
+  const normalized = withoutConnectionRow(ctx, files, manifest, channel)
   // `files` stays raw: snapshots and rollback must restore what was on disk.
   return { files, manifest: normalized.manifest, syncedFiles: normalized.files }
 }
@@ -127,10 +150,10 @@ async function localState(ctx, { requirePackage = false } = {}) {
  * checked-out working tree. This makes hash verification independent of line
  * endings, Git attributes and symlinks.
  */
-async function remoteState(ctx, work, { filter = true } = {}) {
+async function remoteState(ctx, work, { filter = true, channel = ctx.profile } = {}) {
   const rev = await currentCommit(ctx.config, work)
   if (!rev) return null
-  const prefix = `profiles/${ctx.profile}/`
+  const prefix = `profiles/${channel}/`
   const entries = await treeEntries(ctx.config, work, rev, prefix)
   const byPath = new Map(entries.map((entry) => [entry.path, entry]))
   const allAllowed = new Set([...allowedFiles(true, true), 'manifest.json'])
@@ -151,15 +174,15 @@ async function remoteState(ctx, work, { filter = true } = {}) {
     }
   }
 
-  const manifestEntry = byPath.get(manifestPath(ctx.profile))
+  const manifestEntry = byPath.get(manifestPath(channel))
   if (!manifestEntry) return null
   const raw = await readBlob(ctx.config, work, rev, manifestEntry.path)
   if (!raw) throw new SyncError('E_MANIFEST', 'remote manifest.json could not be read')
   const manifest = parseManifest(raw)
-  if (manifest.profile !== ctx.profile) {
+  if (manifest.profile !== channel) {
     throw new SyncError(
       'E_PROFILE_MISMATCH',
-      `manifest says profile "${sanitizeText(manifest.profile, 80)}" but this machine syncs "${ctx.profile}"`,
+      `remote manifest says profile "${sanitizeText(manifest.profile, 80)}" but this machine syncs "${channel}"`,
     )
   }
   const required = `${prefix}package.json`
@@ -175,7 +198,7 @@ async function remoteState(ctx, work, { filter = true } = {}) {
   for (const [path, entry] of Object.entries(manifest.files)) {
     // Syntactic validation always allows every managed file; the local
     // include settings then decide whether it participates in this sync.
-    const safe = validateSyncPath(path, ctx.profile, true, true)
+    const safe = validateSyncPath(path, channel, true, true)
     const name = safe.slice(prefix.length)
     if (!allowed.includes(name)) continue
     const treeEntry = byPath.get(safe)
@@ -215,7 +238,7 @@ async function remoteState(ctx, work, { filter = true } = {}) {
   // A repository written by an older version (or another machine) may still
   // carry a connection row. Strip it here too so it is neither compared nor
   // written back: the row belongs to the machine that runs the pull.
-  const normalized = withoutConnectionRow(ctx, files, manifestFiles)
+  const normalized = withoutConnectionRow(ctx, files, manifestFiles, channel)
   return {
     manifest: manifestFiles,
     files,
@@ -225,11 +248,13 @@ async function remoteState(ctx, work, { filter = true } = {}) {
   }
 }
 
-function header(ctx) {
+function header(ctx, channel = ctx.profile) {
   return [
     `remote:  ${displayRemote(ctx.config.remote)}`,
     `branch:  ${ctx.config.branch}`,
-    `profile: ${ctx.profile}`,
+    channel === ctx.profile
+      ? `profile: ${ctx.profile}`
+      : `profile: ${ctx.profile} (remote directory: ${channel})`,
   ].join('\n')
 }
 
@@ -253,6 +278,16 @@ async function recordState(config, profile, value) {
 }
 
 export async function status(rawConfig, options = {}) {
+  const report = await statusReport(rawConfig, options)
+  return report.text
+}
+
+/**
+ * status() plus the resolved profile/channel and the remote profile list. The
+ * card needs the resolved values because config.profile may be empty (auto
+ * detection) and a migrated machine may sync a differently named directory.
+ */
+export async function statusReport(rawConfig, options = {}) {
   requireRemote(rawConfig)
   const ctx = await resolveContext(rawConfig)
   return withLock(ctx.dshHome, () => statusLocked(ctx, options), { signal: options.signal })
@@ -260,19 +295,49 @@ export async function status(rawConfig, options = {}) {
 
 async function statusLocked(ctx, options) {
   const work = await ensureWorkTree(ctx.config, { signal: options.signal })
-  const local = await localState(ctx)
-  const remote = await remoteState(ctx, work)
   const state = await readState(ctx.config, ctx.profile)
-
-  const lines = ['Config sync status', header(ctx)]
+  let channel = syncChannel(ctx, state)
+  let remote = await remoteState(ctx, work, { channel })
+  let remoteProfiles = []
+  let adopted = false
+  let rev = null
   if (remote === null) {
-    lines.push('', 'Remote repository has no manifest yet.', 'Run /sync-push to publish this profile first.')
-    return lines.join('\n')
+    rev = await currentCommit(ctx.config, work)
+    remoteProfiles = rev ? await remoteProfileNames(ctx, work, rev, options.signal) : []
+    // A machine migrating from a differently named profile can adopt the only
+    // configuration directory on the remote. pull() does the same before it
+    // writes anything, so status can already show the diff that would apply.
+    if (!state && remoteProfiles.length === 1 && remoteProfiles[0] !== channel) {
+      channel = remoteProfiles[0]
+      adopted = true
+      remote = await remoteState(ctx, work, { channel })
+    }
+  }
+  const local = await localState(ctx, { channel })
+
+  const lines = ['Config sync status', header(ctx, channel)]
+  if (remote === null) {
+    if (remoteProfiles.length === 0) {
+      lines.push(
+        '',
+        rev
+          ? `Remote branch ${sanitizeText(ctx.config.branch, 120)} has no manifest yet.`
+          : `Remote branch ${sanitizeText(ctx.config.branch, 120)} does not exist and has no manifest yet.`,
+        'Push from the machine that already has the configuration.',
+      )
+    } else {
+      lines.push(
+        '',
+        `Remote branch ${sanitizeText(ctx.config.branch, 120)} has configuration for: ${summarizeList(remoteProfiles)}.`,
+        `This machine syncs profile "${sanitizeText(channel, 80)}". Pull on a machine that uses one of those names, or push from this machine first.`,
+      )
+    }
+    return { text: lines.join('\n'), profile: ctx.profile, channel, remoteProfiles, adopted: false }
   }
 
   const diff = diffManifests(local.manifest, remote.syncedManifest)
   const head = await headCommit(ctx.config, work, options.signal)
-  const managed = managedSet(ctx.config, ctx.profile)
+  const managed = managedSet(ctx.config, channel)
   const remoteChanged = state
     ? changedFiles(state.files, shaMap(remote.syncedManifest.files), managed)
     : null
@@ -281,6 +346,11 @@ async function statusLocked(ctx, options) {
     `remote commit: ${head ?? 'unknown'} (manifest ${sanitizeText(remote.manifest.generatedAt, 80)})`,
     `local files: ${local.files.size} | plugins: ${pluginCount(local.manifest)}`,
   )
+  if (adopted) {
+    lines.push(
+      `adopted: remote directory "${sanitizeText(channel, 80)}" for local profile "${sanitizeText(ctx.profile, 80)}"`,
+    )
+  }
   if (state) {
     const when = state.syncedAt ? ` at ${sanitizeText(state.syncedAt, 40)}` : ''
     lines.push(`last sync: ${state.direction} ${shortHash(state.commit)}${when}`)
@@ -296,17 +366,17 @@ async function statusLocked(ctx, options) {
     lines.push('last sync: never on this machine')
   }
   lines.push('', summarizeDiff(diff))
-  return lines.join('\n')
+  return { text: lines.join('\n'), profile: ctx.profile, channel, remoteProfiles, adopted }
 }
 
-function commitMessage(ctx, local, message) {
+function commitMessage(ctx, local, message, channel = ctx.profile) {
   const typed = String(message ?? '')
     .replace(/\0/g, '')
     .trim()
     .slice(0, 500)
   if (typed) return typed
   const host = local.manifest.device?.host ?? 'unknown'
-  return `sync(${ctx.profile}): ${new Date().toISOString()} from ${host}`
+  return `sync(${channel}): ${new Date().toISOString()} from ${host}`
 }
 
 /** Wrap a locked sync operation so the activity record reflects it. */
@@ -332,10 +402,11 @@ export async function push(rawConfig, options = {}) {
 
 async function pushLocked(ctx, options) {
   const work = await ensureWorkTree(ctx.config, { signal: options.signal })
-  const local = await localState(ctx, { requirePackage: true })
-  const remote = await remoteState(ctx, work, { filter: false })
   const state = await readState(ctx.config, ctx.profile)
-  const managed = managedSet(ctx.config, ctx.profile)
+  const channel = syncChannel(ctx, state)
+  const local = await localState(ctx, { requirePackage: true, channel })
+  const remote = await remoteState(ctx, work, { filter: false, channel })
+  const managed = managedSet(ctx.config, channel)
   const owned = new Set(Object.keys(state?.files ?? {}))
   const compareSet = new Set([...managed, ...owned])
 
@@ -344,10 +415,11 @@ async function pushLocked(ctx, options) {
       commit: remote.commit,
       files: shaMap(local.manifest.files),
       direction: 'push',
+      channel,
     })
     return [
       'Config sync push',
-      header(ctx),
+      header(ctx, channel),
       '',
       'Already up to date; nothing to commit.',
       warning ? `warning: ${warning}` : '',
@@ -360,7 +432,7 @@ async function pushLocked(ctx, options) {
     if (!state) {
       throw new SyncError(
         'E_CONFLICT',
-        `remote already contains a manifest for profile "${ctx.profile}" and this machine has never synced; run /sync-pull first to adopt it, or push with force=true to overwrite it`,
+        `remote already contains a manifest for profile "${channel}" and this machine has never synced; run /sync-pull first to adopt it, or push with force=true to overwrite it`,
       )
     }
     const remoteChanged = changedFiles(state.files, shaMap(remote.syncedManifest.files), compareSet)
@@ -391,10 +463,11 @@ async function pushLocked(ctx, options) {
       commit: remote.commit,
       files: shaMap(local.manifest.files),
       direction: 'push',
+      channel,
     })
     return [
       'Config sync push',
-      header(ctx),
+      header(ctx, channel),
       '',
       'Already up to date; nothing to commit.',
       preserved.size > 0
@@ -407,15 +480,15 @@ async function pushLocked(ctx, options) {
   }
 
   const findings = ctx.config.secretScan === 'warn' ? scanForSecrets(local.files) : []
-  const prefix = `profiles/${ctx.profile}/`
-  await rm(join(work, 'profiles', ctx.profile), { recursive: true, force: true })
+  const prefix = `profiles/${channel}/`
+  await rm(join(work, 'profiles', channel), { recursive: true, force: true })
   const committed = new Map()
   // Commit the normalized copy: this machine's connection row stays local, so
   // another machine can never be handed a Git remote it did not configure.
   for (const [path, data] of local.syncedFiles) {
     const safe = validateSyncPath(
       path,
-      ctx.profile,
+      channel,
       ctx.config.includeLockfile,
       ctx.config.includeWorkspace,
     )
@@ -423,18 +496,18 @@ async function pushLocked(ctx, options) {
     committed.set(safe, data)
   }
   for (const [path, data] of preserved) {
-    const safe = validateSyncPath(path, ctx.profile, true, true)
+    const safe = validateSyncPath(path, channel, true, true)
     await writeFileAtomic(join(work, safe), data)
     committed.set(safe, data)
   }
-  const manifestRel = manifestPath(ctx.profile)
+  const manifestRel = manifestPath(channel)
   const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`)
   await writeFileAtomic(join(work, manifestRel), manifestBytes)
   committed.set(manifestRel, manifestBytes)
 
-  const message = commitMessage(ctx, local, options.message)
+  const message = commitMessage(ctx, local, options.message, channel)
   const result = await commitManagedFiles(ctx.config, work, {
-    profile: ctx.profile,
+    profile: channel,
     files: committed,
     message,
     signal: options.signal,
@@ -445,10 +518,11 @@ async function pushLocked(ctx, options) {
       commit: remote?.commit ?? result.commit,
       files: shaMap(local.manifest.files),
       direction: 'push',
+      channel,
     })
     return [
       'Config sync push',
-      header(ctx),
+      header(ctx, channel),
       '',
       'Already up to date; nothing to commit.',
       warning ? `warning: ${warning}` : '',
@@ -462,11 +536,12 @@ async function pushLocked(ctx, options) {
     commit: result.commit,
     files: shaMap(local.manifest.files),
     direction: 'push',
+    channel,
   })
 
   const lines = [
     'Config sync push',
-    header(ctx),
+    header(ctx, channel),
     `files:   ${committed.size - 1}`,
     `plugins: ${pluginCount(local.manifest)}`,
     `commit:  ${shortHash(result.commit)}`,
@@ -506,15 +581,19 @@ async function snapshotLocal(ctx, local) {
   for (const [path, data] of local.files) {
     await writeFileAtomic(join(dir, path), data, { mode: 0o600 })
   }
-  await writeFileAtomic(join(dir, manifestPath(ctx.profile)), `${JSON.stringify(local.manifest, null, 2)}\n`, {
-    mode: 0o600,
-  })
+  await writeFileAtomic(
+    join(dir, manifestPath(local.manifest.profile ?? ctx.profile)),
+    `${JSON.stringify(local.manifest, null, 2)}\n`,
+    {
+      mode: 0o600,
+    },
+  )
   await pruneSnapshots(root, ctx.config.snapshotKeep)
   return dir
 }
 
-async function restoreLocal(ctx, localFiles) {
-  const prefix = `profiles/${ctx.profile}/`
+async function restoreLocal(ctx, localFiles, channel = ctx.profile) {
+  const prefix = `profiles/${channel}/`
   for (const name of allowedFiles(ctx.config.includeLockfile, ctx.config.includeWorkspace)) {
     if (!localFiles.has(`${prefix}${name}`)) await rm(join(ctx.profileDir, name), { force: true })
   }
@@ -637,6 +716,26 @@ export async function testConnection(rawConfig, options = {}) {
   })
 }
 
+function remoteEmptyError(ctx, channel, rev, profiles) {
+  const branch = sanitizeText(ctx.config.branch, 120)
+  if (!rev || profiles.length === 0) {
+    return new SyncError(
+      'E_REMOTE_EMPTY',
+      `remote branch "${branch}" has no manifest yet; push from the machine that already has the configuration first`,
+    )
+  }
+  if (profiles.length === 1) {
+    return new SyncError(
+      'E_REMOTE_PROFILE',
+      `remote branch "${branch}" has configuration for profile "${sanitizeText(profiles[0], 80)}", but this machine syncs "${sanitizeText(channel, 80)}". Run /sync-status, then align the profile names or push from this machine to publish its own directory.`,
+    )
+  }
+  return new SyncError(
+    'E_REMOTE_PROFILE',
+    `remote branch "${branch}" has configuration for profiles ${summarizeList(profiles)}; this machine syncs "${sanitizeText(channel, 80)}". Set "profile" to one of them, or push from this machine to publish its own directory.`,
+  )
+}
+
 /**
  * Same work as pull(), but keeps the machine-readable facts the callers need:
  * whether the pull applied a package change without installing it, and whether
@@ -654,23 +753,31 @@ export async function pullReport(rawConfig, options = {}) {
 
 async function pullLocked(ctx, options) {
   const work = await ensureWorkTree(ctx.config, { signal: options.signal })
-  const local = await localState(ctx)
-  const remote = await remoteState(ctx, work)
-
+  const state = await readState(ctx.config, ctx.profile)
+  let channel = syncChannel(ctx, state)
+  let remote = await remoteState(ctx, work, { channel })
+  let adopted = false
   if (remote === null) {
-    throw new SyncError(
-      'E_REMOTE_EMPTY',
-      'remote repository has no manifest yet; push from the source machine first',
-    )
+    const rev = await currentCommit(ctx.config, work)
+    const profiles = rev ? await remoteProfileNames(ctx, work, rev, options.signal) : []
+    // A machine that has never synced may adopt the remote's only directory,
+    // even when its local profile has a different name (desktop -> web). The
+    // confirmation dialog shows the mapping before anything is written.
+    if (!state && profiles.length === 1 && profiles[0] !== channel) {
+      channel = profiles[0]
+      adopted = true
+      remote = await remoteState(ctx, work, { channel })
+    }
+    if (remote === null) throw remoteEmptyError(ctx, channel, rev, profiles)
   }
+  const local = await localState(ctx, { channel })
 
   // Compare against the normalized copy: this machine's own connection row is
   // machine-local, so its presence must never look like drift.
   const diff = diffManifests(local.manifest, remote.syncedManifest)
-  const state = await readState(ctx.config, ctx.profile)
-  const managed = managedSet(ctx.config, ctx.profile)
+  const managed = managedSet(ctx.config, channel)
   const localChanged = state ? changedFiles(state.files, shaMap(local.manifest.files), managed) : []
-  const connectionRow = localConnectionRow(ctx, local)
+  const connectionRow = localConnectionRow(ctx, local, channel)
 
   if (!diff.hasChanges) {
     let warning = null
@@ -679,22 +786,37 @@ async function pullLocked(ctx, options) {
         commit: remote.commit,
         files: shaMap(remote.syncedManifest.files),
         direction: 'pull',
+        channel,
       })
     }
     const text = [
       'Config sync pull',
-      header(ctx),
+      header(ctx, channel),
       '',
       'Already up to date.',
       warning ? `warning: ${warning}` : '',
     ]
       .filter(Boolean)
       .join('\n')
-    return { text, needsInstall: false, connectionPreserved: false }
+    return {
+      text,
+      needsInstall: false,
+      connectionPreserved: false,
+      profile: ctx.profile,
+      channel,
+      adopted,
+    }
   }
 
   if (options.apply !== true) {
-    const lines = ['Config sync pull (dry run)', header(ctx), '', summarizeDiff(diff)]
+    const lines = ['Config sync pull (dry run)', header(ctx, channel), '', summarizeDiff(diff)]
+    if (channel !== ctx.profile) {
+      lines.push(
+        '',
+        `adopt: remote directory "${sanitizeText(channel, 80)}" -> local profile "${sanitizeText(ctx.profile, 80)}"`,
+        'Applying writes the remote files into this machine\'s profile directory and remembers the mapping.',
+      )
+    }
     if (connectionRow) {
       lines.push(
         '',
@@ -710,11 +832,18 @@ async function pullLocked(ctx, options) {
       )
     }
     lines.push('', 'Nothing written. Run /sync-pull apply to apply these files locally.')
-    return { text: lines.join('\n'), needsInstall: false, connectionPreserved: false }
+    return {
+      text: lines.join('\n'),
+      needsInstall: false,
+      connectionPreserved: false,
+      profile: ctx.profile,
+      channel,
+      adopted,
+    }
   }
 
   const snapshot = await snapshotLocal(ctx, local)
-  const prefix = `profiles/${ctx.profile}/`
+  const prefix = `profiles/${channel}/`
   const owned = new Set(Object.keys(state?.files ?? {}))
   const kept = []
   const connectionPath = `${prefix}${CONNECTION_FILE}`
@@ -723,7 +852,7 @@ async function pullLocked(ctx, options) {
     for (const [path, data] of remote.syncedFiles) {
       const safe = validateSyncPath(
         path,
-        ctx.profile,
+        channel,
         ctx.config.includeLockfile,
         ctx.config.includeWorkspace,
       )
@@ -738,7 +867,7 @@ async function pullLocked(ctx, options) {
     for (const [path, data] of remote.syncedFiles) {
       const safe = validateSyncPath(
         path,
-        ctx.profile,
+        channel,
         ctx.config.includeLockfile,
         ctx.config.includeWorkspace,
       )
@@ -770,7 +899,7 @@ async function pullLocked(ctx, options) {
   } catch (error) {
     let restoreNote = 'local files were restored'
     try {
-      await restoreLocal(ctx, local.files)
+      await restoreLocal(ctx, local.files, channel)
     } catch (restoreError) {
       restoreNote = `restoring local files also failed: ${restoreError.message}`
     }
@@ -793,16 +922,22 @@ async function pullLocked(ctx, options) {
     commit: remote.commit,
     files: shaMap(remote.syncedManifest.files),
     direction: 'pull',
+    channel,
   })
 
   const lines = [
     'Config sync pull',
-    header(ctx),
+    header(ctx, channel),
     '',
     summarizeDiff(diff),
     '',
     `snapshot: ${snapshot ?? 'disabled'}`,
   ]
+  if (channel !== ctx.profile) {
+    lines.push(
+      `adopted: remote directory "${sanitizeText(channel, 80)}" for local profile "${sanitizeText(ctx.profile, 80)}"`,
+    )
+  }
   if (localChanged.length > 0) {
     lines.push(`overwritten: local changes since last sync (${listPaths(localChanged)})`)
   }
@@ -832,5 +967,12 @@ async function pullLocked(ctx, options) {
   }
   if (warning) lines.push(`warning: ${warning}`)
   lines.push('', 'Restart DeepSeek Harness so cordis.patch.yml and plugin changes take effect.')
-  return { text: lines.join('\n'), needsInstall, connectionPreserved: connectionRow !== null }
+  return {
+    text: lines.join('\n'),
+    needsInstall,
+    connectionPreserved: connectionRow !== null,
+    profile: ctx.profile,
+    channel,
+    adopted,
+  }
 }

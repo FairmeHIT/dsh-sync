@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-11-19
+
+### Changed
+
+- **The card is minimal by default.** It now shows only the meta line, **Pull** / **Push**, and the
+  outcome notice; connection settings, refresh/test connection, version and the full status text
+  moved under a collapsed **More**. The version check runs lazily when **More** is first opened
+  instead of on mount.
+- **Pull and push confirm before writing.** Pull still runs a read-only preview first, but the diff
+  now opens in a confirmation dialog; push opens its dialog immediately (with the optional commit
+  message). Neither writes anything until the dialog is confirmed, so a stray click can no longer
+  overwrite local files or the remote branch.
+
+### Fixed
+
+- **`E_REMOTE_EMPTY` on a machine whose profile directory is named differently.** The remote
+  manifest lookup only tried `profiles/<local profile>/`, so a remote holding `profiles/desktop/`
+  looked empty on a machine whose profile was `web`. Pull and status now adopt the remote's single
+  profile directory on first use, record the mapping as `channel` in `state.json`, and keep writing
+  into the local profile's own directory; the output and card show `profile → channel`. When the
+  remote holds several profiles the plugin no longer guesses: it reports `E_REMOTE_PROFILE` with the
+  available names. A genuinely empty branch keeps `E_REMOTE_EMPTY`, with wording that no longer
+  tells the user to push from a machine that has not pushed either.
+
 ## [0.7.3] - 2026-11-19
 
 ### Added
