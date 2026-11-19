@@ -472,6 +472,23 @@ test('a pinned copy ahead of its branch shows no downgrade arrow', async () => {
   assert.equal(ui.button('Check for updates').props.disabled, false)
 })
 
+test('an unreadable installation explains the actual reason', async () => {
+  // A profile the host cannot name is not "not from GitHub": it carries a
+  // detail worth showing instead of the generic sentence.
+  const ui = setup({
+    update: response({
+      ok: true,
+      supported: false,
+      current: '0.7.3',
+      reason: 'no-manifest',
+      detail: 'cannot detect a profile; set config.profile explicitly',
+    }),
+  })
+  await tick()
+  const note = ui.find((n) => /dcfg-version-note/.test(String(n.props.className || '')) && /set config\.profile/.test(ui.text(n)))
+  assert.ok(note, 'the host detail is shown')
+})
+
 test('a busy host refuses the update and the row says so', async () => {
   const ui = setup({ update: response({ ok: true, supported: true, current: '0.7.2', latest: '0.7.3', available: true }) })
   await tick()

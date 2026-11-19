@@ -505,7 +505,7 @@ window.__ModuleLoader__.load({
                 current: data.current || '',
                 latest: data.latest || '',
                 reason: data.reason || '',
-                message: data.error || '',
+                message: data.error || data.detail || '',
               },
             }
           })
