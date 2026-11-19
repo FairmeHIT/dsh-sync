@@ -206,7 +206,9 @@ dsh plugin --profile desktop add dsh-config-git-sync
   （失败自动回滚到旧版本），卡片会短暂中断，完成后提示刷新页面。更新后本机依赖会被固定到完整
   commit（`github:owner/repo#<sha>`），此后 DSH 原生插件页也能显示更新并回滚。用本地目录或
   `link:` 安装时不提供更新按钮（会破坏开发目录），卡片会说明原因；离线导致检查失败时不显示错误，
-  只保留 **检查更新**。
+  只保留 **检查更新**。版本读取会按顺序尝试 `raw.githubusercontent.com`、jsDelivr、
+  gcore jsDelivr 和 `github.com` 直连，第一个有响应就用它——国内网络访问不了
+  `raw.githubusercontent.com` 时也能正常检查；全部失败时错误里会列出试过的每个主机。
 - 同一时刻只会有一个同步在运行（跨窗口/标签共享同一把锁）。操作期间再次点击会收到
   HTTP 409 `E_BUSY`，卡片提示“另一台同步正在进行中”；离开页面再回来，卡片会从
   Host 恢复“同步中”状态和上一次操作的结果，而不是显示空闲。
@@ -389,7 +391,8 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 | `E_CONFIG_TIMEOUT` / `E_TIMEOUT` | 插件页面请求超时（保存 15s / 读取 90s / 同步 10min）；网络慢时重试 |
 | `E_HTTP` | 插件页面请求失败（路由未响应或返回非 JSON）；刷新页面，必要时重启 DSH |
 | `E_UPDATE_UNSUPPORTED` / `E_UPDATE_CURRENT` | 当前安装不能从卡片更新（本地目录安装、非 GitHub 来源、宿主无插件管理器），或已经是最新版本 |
-| `E_UPDATE_CHECK` / `E_UPDATE_REMOTE` / `E_UPDATE_GIT` | 检查更新失败：读不到远端 `package.json` 或无法 `git ls-remote`；确认能访问 GitHub 后点 **检查更新** 重试 |
+| `E_UPDATE_CHECK` / `E_UPDATE_REMOTE` / `E_UPDATE_GIT` | 检查更新失败：读不到远端 `package.json` 或无法 `git ls-remote`；错误里会列出试过的主机，确认网络后点 **检查更新** 重试 |
+| `E_UPDATE_UNSUPPORTED`（no plugin manager） | 当前 Host 没有可用的插件管理器；在桌面端/网页端（带插件管理器）里打开卡片再更新，CLI-only 环境请用 `dsh plugin add` |
 | Git 认证失败 | 配置 SSH key 或预先缓存 HTTPS 凭据；插件不会弹出登录框 |
 | pull 后插件没变化 | 重启 DSH；`cordis.patch.yml` 只在启动时组合 |
 

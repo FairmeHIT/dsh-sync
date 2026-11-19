@@ -12,6 +12,7 @@ import {
   startUpdate,
   updateStatePath,
   checkUpdate,
+  createManagerProbe,
 } from '../src/update.js'
 
 const SHA = 'e9b312ddd95031ab1f84485a5c4764789ae36acf'
@@ -170,6 +171,90 @@ describe('checkUpdate', () => {
   })
 })
 
+describe('createManagerProbe', () => {
+  test('finds a manager on the connection scope when the outer context has none', () => {
+    const manager = { installBundle: async () => ({}) }
+    const scope = { get: (name) => (name === 'pluginManager' ? manager : undefined) }
+    const ctx = { get: () => undefined, inject: () => assert.fail('must not start a service that is already visible') }
+    const probe = createManagerProbe(ctx, { context: scope })
+    assert.equal(probe.get(), manager)
+  })
+
+  test('starts the lazy service through Cordis and keeps the context that saw it', async () => {
+    const manager = { installBundle: async () => ({}) }
+    let offered = null
+    const ctx = {
+      get: () => undefined,
+      inject: (names, callback) => {
+        assert.deepEqual(names, ['pluginManager'])
+        offered = { get: (name) => (name === 'pluginManager' ? manager : undefined) }
+        callback(offered)
+      },
+    }
+    const probe = createManagerProbe(ctx, {})
+    assert.equal(probe.get(), undefined)
+    assert.equal(await probe.ensure(), manager)
+    // Later reads answer without another start attempt.
+    assert.equal(probe.get(), manager)
+  })
+
+  test('gives up on the deadline instead of hanging when the service never arrives', async () => {
+    const ctx = { get: () => undefined, inject: () => {} }
+    const probe = createManagerProbe(ctx, { timeoutMs: 20 })
+    assert.equal(await probe.ensure(), undefined)
+  })
+
+  test('ignores a service without installBundle', async () => {
+    const ctx = { get: () => ({ readBundleDetail: () => {} }), inject: () => assert.fail('must not start') }
+    const probe = createManagerProbe(ctx, {})
+    assert.equal(probe.get(), undefined)
+  })
+})
+
+describe('the published version read', () => {
+  test('falls back to a mirror when raw.githubusercontent is unreachable', async (t) => {
+    const config = await home(t, { spec: 'github:FairmeHIT/dsh-sync' })
+    const tried = []
+    const state = await checkUpdate(config, {
+      currentVersion: '0.7.3',
+      fetchText: async (url) => {
+        tried.push(url)
+        if (url.includes('raw.githubusercontent.com')) throw new Error('fetch failed')
+        return JSON.stringify({ name: 'dsh-config-git-sync', version: '0.7.4' })
+      },
+    })
+    assert.equal(state.latest, '0.7.4')
+    assert.equal(state.available, true)
+    assert.equal(tried.length, 2, `stopped at the first answer: ${tried.join(' ')}`)
+    assert.match(tried[1], /jsdelivr/)
+  })
+
+  test('reports every source it tried when none of them answers', async (t) => {
+    const config = await home(t, { spec: 'github:FairmeHIT/dsh-sync' })
+    const state = await checkUpdate(config, {
+      currentVersion: '0.7.3',
+      fetchText: async () => {
+        throw new Error('offline')
+      },
+    })
+    assert.equal(state.latest, null)
+    assert.equal(state.available, false)
+    assert.match(state.error, /tried 4 sources/)
+    assert.match(state.error, /raw\.githubusercontent\.com/)
+    assert.match(state.error, /jsdelivr/)
+  })
+
+  test('moves on when a source answers with something that is not JSON', async (t) => {
+    const config = await home(t, { spec: 'github:FairmeHIT/dsh-sync' })
+    const state = await checkUpdate(config, {
+      currentVersion: '0.7.3',
+      fetchText: async (url) =>
+        url.includes('raw.githubusercontent.com') ? '<html>blocked</html>' : JSON.stringify({ version: '0.7.4' }),
+    })
+    assert.equal(state.latest, '0.7.4')
+  })
+})
+
 describe('resolveCommit', () => {
   test('turns refs/heads output into a full sha', async () => {
     const sha = await resolveCommit(
@@ -224,6 +309,26 @@ describe('startUpdate', () => {
   test('refuses without a plugin manager', async (t) => {
     const config = await home(t)
     await assert.rejects(() => startUpdate(config, {}), /plugin manager/)
+  })
+
+  test('starts the lazy manager instead of failing on the first read', async (t) => {
+    const config = await home(t, { spec: 'github:FairmeHIT/dsh-sync' })
+    let started = 0
+    const result = await startUpdate(config, {
+      currentVersion: '0.7.2',
+      immediate: true,
+      remoteVersion: async () => '0.7.3',
+      runGit: async () => `${FULL_SHA}\trefs/heads/main\n`,
+      getManager: () => undefined,
+      ensureManager: async () => {
+        started += 1
+        return { installBundle: async () => ({ result: { application: 'applied' } }) }
+      },
+    })
+    assert.equal(started, 1)
+    assert.equal(result.to, '0.7.3')
+    await result.settled
+    assert.equal((await readUpdateState(config)).status, 'done')
   })
 
   test('refuses a local install, a non-GitHub install and a current version', async (t) => {

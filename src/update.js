@@ -157,6 +157,63 @@ async function defaultFetchText(url, timeoutMs = CHECK_TIMEOUT_MS) {
   }
 }
 
+/**
+ * Resolve the plugin manager at the moment of use. It is a lazy service: a
+ * one-shot `ctx.get` on the plugin's outer context misses it on the desktop
+ * host, which left the card reporting "no plugin manager" and doing nothing.
+ * Probe every context we were handed, then let Cordis start the service and
+ * ask again under a deadline. Callers get a definite answer either way.
+ */
+export function createManagerProbe(ctx, deps = {}) {
+  const timeoutMs = deps.timeoutMs ?? 5_000
+  const extra = []
+  const candidates = () => [deps.context, ...extra, ctx]
+
+  const read = () => {
+    for (const context of candidates()) {
+      try {
+        const manager = typeof context?.get === 'function' ? context.get('pluginManager') : undefined
+        if (manager && typeof manager.installBundle === 'function') return manager
+      } catch {}
+    }
+    return undefined
+  }
+
+  /** A context that can see the service, so later reads skip the wait. */
+  const adopt = (context) => {
+    if (context && context !== ctx && !extra.includes(context)) extra.push(context)
+  }
+
+  const get = () => read()
+
+  const ensure = async () => {
+    const immediate = get()
+    if (immediate) return immediate
+    if (typeof ctx?.inject !== 'function') return undefined
+    await new Promise((resolve) => {
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(finish, timeoutMs)
+      try {
+        ctx.inject(['pluginManager'], (scope) => {
+          adopt(scope)
+          finish()
+        })
+      } catch {
+        finish()
+      }
+    })
+    return get()
+  }
+
+  return { get, ensure, adopt }
+}
+
 async function defaultRunGit(args, timeoutMs = GIT_TIMEOUT_MS) {
   return await new Promise((resolve, reject) => {
     execFile('git', args, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
@@ -169,15 +226,52 @@ async function defaultRunGit(args, timeoutMs = GIT_TIMEOUT_MS) {
   })
 }
 
+/**
+ * Where the published manifest can be read. `raw.githubusercontent.com` is the
+ * canonical host but it is unreachable from networks that block it (mainland
+ * China among them, where it times out rather than resolves), so the card tries
+ * mirrors in order and stops at the first one that answers. Every entry returns
+ * the same `package.json`, so a mirror cannot skew the version.
+ */
+function manifestUrls(repo) {
+  const { owner, repo: name, branch } = repo
+  const base = `gh/${owner}/${name}@${branch}/package.json`
+  return [
+    `${RAW_HOST}/${owner}/${name}/${branch}/package.json`,
+    `https://cdn.jsdelivr.net/${base}`,
+    `https://gcore.jsdelivr.net/${base}`,
+    `https://github.com/${owner}/${name}/raw/${branch}/package.json`,
+  ]
+}
+
 /** The version the repository publishes on the branch this machine follows. */
 async function remoteVersion(repo, deps) {
   const fetchText = deps.fetchText ?? defaultFetchText
-  const url = `${RAW_HOST}/${repo.owner}/${repo.repo}/${repo.branch}/package.json`
-  const text = await fetchText(url)
-  const manifest = JSON.parse(text)
-  const version = typeof manifest?.version === 'string' ? manifest.version : ''
-  if (!version) throw new SyncError('E_UPDATE_REMOTE', `the repository publishes no version: ${repo.owner}/${repo.repo}`)
-  return version
+  const urls = deps.manifestUrls ? deps.manifestUrls(repo) : manifestUrls(repo)
+  const failures = []
+  for (const url of urls) {
+    let text
+    try {
+      text = await fetchText(url)
+    } catch (error) {
+      failures.push(`${new URL(url).host}: ${error?.message ?? String(error)}`)
+      continue
+    }
+    let manifest
+    try {
+      manifest = JSON.parse(text)
+    } catch {
+      failures.push(`${new URL(url).host}: the response was not JSON`)
+      continue
+    }
+    const version = typeof manifest?.version === 'string' ? manifest.version : ''
+    if (version) return version
+    failures.push(`${new URL(url).host}: the manifest publishes no version`)
+  }
+  throw new SyncError(
+    'E_UPDATE_REMOTE',
+    `cannot read the version of ${repo.owner}/${repo.repo} (tried ${urls.length} sources: ${failures.join('; ')})`,
+  )
 }
 
 /** The commit `refs/heads/<branch>` points at, as a full SHA. */
@@ -299,7 +393,12 @@ export async function runUpdate(config, manager, target) {
  * old instance.
  */
 export async function startUpdate(config, deps = {}) {
-  const manager = deps.getManager ? deps.getManager() : undefined
+  let manager = deps.getManager ? deps.getManager() : undefined
+  // A lazy service is often absent on a first synchronous read; let the caller
+  // start it and ask again before giving up on this host.
+  if ((!manager || typeof manager.installBundle !== 'function') && typeof deps.ensureManager === 'function') {
+    manager = await deps.ensureManager()
+  }
   if (!manager || typeof manager.installBundle !== 'function') {
     throw new SyncError('E_UPDATE_UNSUPPORTED', unsupportedReason('no-manager'))
   }

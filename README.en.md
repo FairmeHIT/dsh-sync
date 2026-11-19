@@ -231,7 +231,10 @@ The card stays minimal by default: one meta line (remote · branch · profile), 
   dependency is pinned to a full commit (`github:owner/repo#<sha>`), which is also what lets DSH's
   native Plugins page update and roll back later. A local directory or `link:` install gets an
   explanation instead of a button (updating it would overwrite your checkout), and a failed check
-  (for example offline) shows no error at all — only **Check for updates**.
+  (for example offline) shows no error at all — only **Check for updates**. The version read tries
+  `raw.githubusercontent.com`, jsDelivr, gcore jsDelivr and `github.com` in that order and uses the
+  first one that answers, so a network that cannot reach `raw.githubusercontent.com` still checks
+  normally; when every source fails, the error lists each host it tried.
 - Only one sync runs at a time (one shared lock across windows and tabs). Clicking during a sync
   returns HTTP 409 `E_BUSY` and the card says another sync is running. When you leave the page and
   come back, the card restores the busy state and the last outcome from the host instead of
@@ -444,7 +447,8 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 | `E_CONFIG_TIMEOUT` / `E_TIMEOUT` | A plugin-page request timed out (save 15s / read 90s / sync 10min); retry on a slow network |
 | `E_HTTP` | A plugin-page request failed (route unresponsive or non-JSON response); refresh the page, restart DSH if needed |
 | `E_UPDATE_UNSUPPORTED` / `E_UPDATE_CURRENT` | This installation cannot be updated from the card (local directory, not from GitHub, or no plugin manager on the host), or it is already the newest version |
-| `E_UPDATE_CHECK` / `E_UPDATE_REMOTE` / `E_UPDATE_GIT` | The update check failed: the remote `package.json` or `git ls-remote` did not answer; confirm GitHub is reachable and press **Check for updates** |
+| `E_UPDATE_CHECK` / `E_UPDATE_REMOTE` / `E_UPDATE_GIT` | The update check failed: the remote `package.json` or `git ls-remote` did not answer; the error lists the hosts it tried — confirm the network and press **Check for updates** |
+| `E_UPDATE_UNSUPPORTED` (no plugin manager) | This Host exposes no plugin manager; open the card in the desktop/web app to update, or run `dsh plugin add` in a CLI-only environment |
 | Git authentication failure | Set up an SSH key or cache HTTPS credentials; the plugin never prompts |
 | Nothing changed after a pull | Restart DSH; `cordis.patch.yml` is composed at boot |
 

@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-11-19
+
+### Fixed
+
+- **The card could not update the plugin: every click failed with "no plugin manager".** The plugin
+  manager is a lazy Cordis service, and the one-shot `get('pluginManager')` on the plugin's outer
+  context misses it on the desktop host, so the update route threw `E_UPDATE_UNSUPPORTED` before it
+  even recorded a running state — which is why `update.json` never appeared. The card now probes
+  every context it was handed (the connection scope included), and, when none has it yet, lets
+  Cordis start the service and asks again under a five-second deadline.
+- **The version check failed on networks that cannot reach `raw.githubusercontent.com`.** The single
+  canonical host is unreachable from mainland China, where the request times out instead of
+  failing fast, so "Check for updates" reported nothing even when a newer release existed. The read
+  now tries raw.githubusercontent.com, jsDelivr, gcore jsDelivr and github.com in order, stops at
+  the first answer, and — when every source fails — reports each host it tried instead of one
+  opaque `fetch failed`.
+
 ## [0.7.4] - 2026-11-19
 
 ### Changed
