@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.3] - 2026-11-19
 
 ### Added
 
@@ -24,8 +24,12 @@ All notable changes to this project are documented here. The format follows
   cannot reinstall the plugin underneath a running Git operation. The new spec
   pins the full commit (`github:owner/repo#<sha>`), so DSH's native Plugins page
   gains update and rollback for this bundle as well. Local (`link:`, `file:`,
-  path) installs get an explanation instead of a button. New routes:
-  `GET|POST /api/config-sync/update` and `GET /api/config-sync/update-state`.
+  path) installs get an explanation instead of a button, and a host that cannot
+  read the profile explains what it needs. The row shows the target version only
+  while an update is actually offered: a copy pinned to a commit can sit ahead of
+  the branch it was pinned from, and an arrow would read as an instruction to
+  downgrade. New routes: `GET|POST /api/config-sync/update` and
+  `GET /api/config-sync/update-state`.
 
 ## [0.7.2] - 2026-11-19
 
