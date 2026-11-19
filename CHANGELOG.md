@@ -19,11 +19,13 @@ All notable changes to this project are documented here. The format follows
   request, the host answers `202` first and writes the outcome to
   `$DSH_HOME/config-sync/update.json`, which the card polls through
   `GET /api/config-sync/update-state`; a failed attempt is reported with its
-  reason and can be retried from the same row. The new spec pins the full commit
-  (`github:owner/repo#<sha>`), so DSH's native Plugins page gains update and
-  rollback for this bundle as well. Local (`link:`, `file:`, path) installs get an
-  explanation instead of a button. New routes: `GET|POST /api/config-sync/update`
-  and `GET /api/config-sync/update-state`.
+  reason and can be retried from the same row. While a sync holds the lock the
+  update is refused with the same `E_BUSY` answer the other controls use, so it
+  cannot reinstall the plugin underneath a running Git operation. The new spec
+  pins the full commit (`github:owner/repo#<sha>`), so DSH's native Plugins page
+  gains update and rollback for this bundle as well. Local (`link:`, `file:`,
+  path) installs get an explanation instead of a button. New routes:
+  `GET|POST /api/config-sync/update` and `GET /api/config-sync/update-state`.
 
 ## [0.7.2] - 2026-11-19
 

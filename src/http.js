@@ -1,4 +1,5 @@
 import { PACKAGE_NAME } from './config.js'
+import { SyncError } from './errors.js'
 import { displayRemote } from './git.js'
 import { publicConfig, validateRemoteFields } from './remote-config.js'
 
@@ -204,6 +205,11 @@ export function createHttpRoutes(config, operations, editor) {
   async function updateStartRoute(request) {
     try {
       await readBody(request)
+      // A running sync holds the lock and, often, a Git process on the profile
+      // this update would reinstall underneath. Refuse instead of racing it.
+      if (operations.isBusy && (await operations.isBusy())) {
+        throw new SyncError('E_BUSY', 'a sync is running; update after it finishes')
+      }
       const result = await operations.startUpdate(config)
       return json({ ok: true, ...identity(config), accepted: true, from: result.from, to: result.to }, 202)
     } catch (error) {

@@ -587,7 +587,9 @@ window.__ModuleLoader__.load({
               update: {
                 ...(current.update || {}),
                 phase: 'failed',
-                message: (error && error.message) || copy.updateFailed,
+                message: error && error.code === 'E_BUSY'
+                  ? copy.busyElsewhere
+                  : (error && error.message) || copy.updateFailed,
               },
             }
           })

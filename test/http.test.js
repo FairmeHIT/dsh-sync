@@ -284,6 +284,22 @@ describe('plugin update routes', () => {
     assert.equal(body.code, 'E_REQUEST')
   })
 
+  test('POST /update refuses while a sync holds the lock', async () => {
+    let started = false
+    const routes = createHttpRoutes(config, {
+      isBusy: async () => true,
+      startUpdate: async () => {
+        started = true
+        return { from: '0.7.2', to: '0.7.3' }
+      },
+    })
+    const { response, body } = await call(routes, HTTP_ROUTES.update, { method: 'POST', body: {} })
+    assert.equal(response.status, 409)
+    assert.equal(body.busy, true)
+    assert.equal(body.code, 'E_BUSY')
+    assert.equal(started, false, 'the update must not start under a running sync')
+  })
+
   test('GET /update-state reports the last outcome, or null when there is none', async () => {
     const values = [null, { status: 'done', from: '0.7.2', to: '0.7.3', message: '' }]
     const routes = createHttpRoutes(config, { readUpdateState: async () => values.shift() })

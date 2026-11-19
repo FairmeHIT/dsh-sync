@@ -472,6 +472,16 @@ test('a pinned copy ahead of its branch shows no downgrade arrow', async () => {
   assert.equal(ui.button('Check for updates').props.disabled, false)
 })
 
+test('a busy host refuses the update and the row says so', async () => {
+  const ui = setup({ update: response({ ok: true, supported: true, current: '0.7.2', latest: '0.7.3', available: true }) })
+  await tick()
+  ui.updateQueue.push(response({ ok: false, code: 'E_BUSY', message: 'a sync is running', busy: true }, false))
+  ui.button('Update to 0.7.3').props.onClick(); await tick()
+  assert.equal(ui.stateCalls.length, 0, 'nothing to poll when the update never started')
+  const note = ui.find((n) => /dcfg-version-note/.test(String(n.props.className || '')) && /Another sync is already running/.test(ui.text(n)))
+  assert.ok(note, 'the busy explanation replaces the raw message')
+})
+
 test('a version row speaks Chinese when the client does', async () => {
   const ui = setup({
     language: 'zh-CN',
