@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-19
+
+### Fixed
+
+- **Test connection failed on every machine with `E_SYNC git.indexEntries is
+  not a function`** (0.7.1 regression). The 0.7.1 fix made the probe re-commit
+  the existing synced files, so `probeRemote` began calling `indexEntries`, but
+  `testConnection` hands the probe a hand-built git adapter and that adapter was
+  never given the new helper. The probe's own e2e tests pass the whole git
+  module, so they stayed green while the real button failed. The adapter now
+  includes `indexEntries`, and a new e2e test drives `testConnection` itself
+  against a remote that already holds synced files.
+
 ### Changed
 
 - **The bundle card now reads as three plain steps.** A status card shows the

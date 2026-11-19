@@ -15,6 +15,7 @@ import {
   displayRemote,
   ensureWorkTree,
   headCommit,
+  indexEntries,
   pushBranch,
   readBlob,
   removeManagedFile,
@@ -620,6 +621,8 @@ export async function pull(rawConfig, options = {}) {
 export async function testConnection(rawConfig, options = {}) {
   requireRemote(rawConfig)
   const ctx = await resolveContext(rawConfig)
+  // Keep this adapter aligned with probe.js's documented git needs: a helper
+  // that is missing here only fails at runtime, inside a real connection test.
   const git = {
     ensureWorkTree,
     commitManagedFiles,
@@ -627,6 +630,7 @@ export async function testConnection(rawConfig, options = {}) {
     currentCommit,
     readBlob,
     removeManagedFile,
+    indexEntries,
   }
   return withLock(ctx.dshHome, () => withActivity(ctx, 'probe', () => probeRemote(ctx.config, git, options)), {
     signal: options.signal,
