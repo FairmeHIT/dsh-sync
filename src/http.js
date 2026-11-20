@@ -82,6 +82,12 @@ function optionalBoolean(body, key) {
   return body[key]
 }
 
+function optionalString(body, key) {
+  if (body[key] === undefined || body[key] === null) return ''
+  if (typeof body[key] !== 'string') throw new BadRequest(`${key} must be a string`)
+  return body[key].trim().slice(0, 200)
+}
+
 function optionalMessage(body) {
   if (body.message === undefined || body.message === null) return ''
   if (typeof body.message !== 'string') throw new BadRequest('message must be a string')
@@ -171,10 +177,14 @@ export function createHttpRoutes(config, operations, editor) {
     try {
       body = await readBody(request)
       const apply = optionalBoolean(body, 'apply')
+      // `force` accepts a destructive pull; `expectedCommit` binds an apply to
+      // the preview the user actually reviewed.
+      const force = optionalBoolean(body, 'force')
+      const expectedCommit = optionalString(body, 'expectedCommit')
       // pullReport() is preferred because it also carries the facts the card
       // needs to name the follow-up step; a plain pull() still returns text.
       const run = operations.pullReport ?? operations.pull
-      const report = await run(config, { apply })
+      const report = await run(config, { apply, force, expectedCommit })
       const text = typeof report === 'string' ? report : String(report?.text ?? '')
       return json({
         ok: true,
@@ -185,6 +195,10 @@ export function createHttpRoutes(config, operations, editor) {
         profile: typeof report === 'string' ? undefined : report?.profile,
         channel: typeof report === 'string' ? undefined : report?.channel,
         adopted: typeof report === 'string' ? undefined : report?.adopted === true,
+        commit: typeof report === 'string' ? undefined : report?.commit,
+        snapshot: typeof report === 'string' ? undefined : report?.snapshot,
+        destructive: typeof report === 'string' ? false : report?.destructive === true,
+        missing: typeof report === 'string' ? undefined : report?.missing,
       })
     } catch (error) {
       return failure(config, error, error instanceof BadRequest ? 400 : 200)

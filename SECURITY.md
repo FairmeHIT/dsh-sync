@@ -27,12 +27,36 @@ manifest, reads exact blobs from Git objects rather than a filtered checkout, an
 staged and committed bytes before pushing. Remote-provided text is stripped of control/ANSI
 characters and bounded before it reaches model-visible output.
 
-## Package installation is opt-in
+## Package installation runs after a pull
 
-`reconcile` defaults to `none`. Setting it to `install` runs `pnpm install`, `corepack pnpm
-install` or `npm install` in the profile after a pull. Because the remote `package.json` (and the
-optional `pnpm-workspace.yaml`, which can contain `allowBuilds`) selects the packages and install
-scripts, only enable `install` for a repository you trust, and review the pulled diff first.
+`reconcile` defaults to `install`: a pull that changes `package.json`, the lockfile or the plugin
+list runs `pnpm install`, `corepack pnpm install` or `npm install` in the profile. Because the
+remote `package.json` (and the optional `pnpm-workspace.yaml`, which can contain `allowBuilds`)
+selects the packages and install scripts, only keep the default for a repository you trust, and
+review the pulled diff first. Set `reconcile: none` to write files only and print the manual
+install command.
+
+The install step is gated on content, not just on the presence of a file:
+
+- `E_INSTALL_EMPTY` / `E_INSTALL_SHRINK`: a remote manifest that removes every dependency, or at
+  least half of them, skips the automatic install and reports it.
+- After an install the plugin checks that every dependency declared in the pulled `package.json`
+  exists in `node_modules` and reports the missing ones in the pull output.
+
+## A pull can no longer empty a profile
+
+The plugin never deletes `package.json` or `cordis.patch.yml`. When the remote manifest omits one
+of them, the local copy is kept and reported as `kept locally`, because an incomplete remote (for
+example a branch pushed from a profile that had already lost the file) is indistinguishable from
+an intentional removal.
+
+Every other managed file that the remote drops is quarantined into
+`$DSH_HOME/config-sync/snapshots/<profile>/<stamp>/removed/` instead of being deleted, and every
+apply writes a rollback snapshot even when `snapshot: false` is configured.
+
+A pull that would drop the whole plugin list, or at least half of it while at least five plugins
+were present, is refused with `E_DESTRUCTIVE_PULL` until it is re-run with `--force`
+(`/sync-pull apply --force`, the tool's `force: true`, or the card's forced confirmation).
 
 ## Secrets in the synchronized files
 

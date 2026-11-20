@@ -25,6 +25,7 @@ function setup({ language = 'en', configFailure = false, update = null, updateSt
       return [current, (next) => { current = typeof next === 'function' ? next(current) : next }]
     },
     useCallback: (callback) => callback,
+    useRef: (value) => ({ current: value }),
     useEffect(fn) { if (initial) effects.push(fn) },
   }
   const window = { __ModuleLoader__: { load(def) { exported = def.factory(() => React) } } }
@@ -111,7 +112,7 @@ test('pull only compares first and writes after the dialog is confirmed', async 
   assert.equal(ui.calls.length, 2, 'preview must not write')
   ui.button('Confirm').props.onClick(); await tick()
   assert.equal(ui.calls.length, 4)
-  assert.deepEqual(ui.body(ui.calls[2]), { apply: true })
+  assert.deepEqual(ui.body(ui.calls[2]), { apply: true, expectedCommit: '', force: false })
   assert.match(ui.notice(), /applied|restart/i)
 })
 

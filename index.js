@@ -63,6 +63,13 @@ export function parsePushInput(rawInput) {
   return { force, message: rest.trim() }
 }
 
+/** Parse `/sync-pull [apply] [--force]`; `apply` still has to come first. */
+export function parsePullInput(rawInput) {
+  const apply = parseApplyInput(rawInput)
+  const force = /(?:^|\s)(?:--force|-f)(?:\s|$)/i.test(String(rawInput ?? ''))
+  return { apply, force }
+}
+
 export function apply(ctx, rawConfig) {
   const config = normalizeConfig(rawConfig)
   const log = ctx.logger?.info ? (message) => ctx.logger.info(message) : () => {}
@@ -110,17 +117,32 @@ export function apply(ctx, rawConfig) {
     defineTool({
       name: 'config_sync_pull',
       description:
-        'Fetch package.json and cordis.patch.yml from the configured Git remote. Defaults to a dry run. Set apply=true only after the user confirms, because it overwrites local files after writing a pre-restore snapshot.',
+        'Fetch package.json and cordis.patch.yml from the configured Git remote. Defaults to a dry run. Set apply=true only after the user confirms, because it overwrites local files after writing a pre-restore snapshot. A pull that would remove most of the plugin list is refused unless force=true; pass expectedCommit from the preview so the apply cannot land on content the user never reviewed.',
       parameters: {
         apply: {
           type: 'boolean',
           description: 'Write the remote files to this machine. Default false (dry run).',
         },
+        force: {
+          type: 'boolean',
+          description:
+            'Apply even though the remote would remove every plugin or most of them. Only after the user explicitly accepted that removal.',
+        },
+        expectedCommit: {
+          type: 'string',
+          description:
+            'Commit the user reviewed in the preview. The apply is refused with E_STALE_PREVIEW if the remote branch moved since.',
+        },
       },
       output: textOutput,
       async execute(args, exec) {
         try {
-          return await pull(config, { apply: args.apply === true, signal: exec?.signal })
+          return await pull(config, {
+            apply: args.apply === true,
+            force: args.force === true,
+            expectedCommit: args.expectedCommit,
+            signal: exec?.signal,
+          })
         } catch (error) {
           throw toToolError(error)
         }
@@ -153,12 +175,13 @@ export function apply(ctx, rawConfig) {
       }),
       scope.commands.register({
         name: 'sync-pull',
-        description: 'Preview or apply profile files from the config-sync Git remote. Use "apply" to write.',
-        input: { hint: 'apply', attachments: false },
+        description:
+          'Preview or apply profile files from the config-sync Git remote. Use "apply" to write; add --force only to accept a pull that removes most plugins.',
+        input: { hint: 'apply [--force]', attachments: false },
         handler: commandResult((invocation) => {
-          const apply = parseApplyInput(invocation?.rawInput)
-          log(`[config-sync] pull apply=${apply}`)
-          return pull(config, { apply, signal: invocation?.signal })
+          const { apply: shouldApply, force } = parsePullInput(invocation?.rawInput)
+          log(`[config-sync] pull apply=${shouldApply} force=${force}`)
+          return pull(config, { apply: shouldApply, force, signal: invocation?.signal })
         }),
       }),
     ])

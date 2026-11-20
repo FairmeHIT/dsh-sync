@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readFile, readdir, rm } from 'node:fs/promises'
+import { readFile, readdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PACKAGE_NAME, PLUGIN_ID, requireBranch, requireRemote, resolveDshHome } from './config.js'
 import {
@@ -25,15 +25,23 @@ import { withLock } from './lock.js'
 import { writeStart, writeFinish } from './activity.js'
 import { probeRemote } from './probe.js'
 import {
+  assertManifestPlugins,
+  assertPullSafe,
   assertDeletable,
   assertProfileWritable,
   assertRemoteManifestPlausible,
   detectUnmanagedRemoval,
+  describeDropped,
+  installRisk,
+  isDestructivePull,
   listProfileEntries,
-  plannedDeletions,
-  snapshotAlways,
+  missingDependencies,
+  pullRisk,
+  quarantineManagedFile,
+  PROTECTED_ENTRIES,
 } from './safety.js'
 import {
+  BASE_FILES,
   allowedFiles,
   buildManifest,
   changedFiles,
@@ -581,22 +589,26 @@ async function pruneSnapshots(root, keep) {
   for (const name of stale) await rm(join(root, name), { recursive: true, force: true })
 }
 
-async function snapshotLocal(ctx, local) {
-  if (!ctx.config.snapshot) return null
+async function snapshotLocal(ctx, local, options = {}) {
+  if (!options.force && !ctx.config.snapshot) return null
   const root = join(ctx.dshHome, 'config-sync', 'snapshots', ctx.profile)
   const base = nowStamp()
   let dir = join(root, base)
   for (let suffix = 1; await pathExists(dir); suffix += 1) dir = join(root, `${base}-${suffix}`)
+  // Build the snapshot beside its final name and publish it with a rename, so an
+  // interrupted pull can never leave a half-written rollback point behind.
+  const staging = `${dir}.partial`
   for (const [path, data] of local.files) {
-    await writeFileAtomic(join(dir, path), data, { mode: 0o600 })
+    await writeFileAtomic(join(staging, path), data, { mode: 0o600 })
   }
   await writeFileAtomic(
-    join(dir, manifestPath(local.manifest.profile ?? ctx.profile)),
+    join(staging, manifestPath(local.manifest.profile ?? ctx.profile)),
     `${JSON.stringify(local.manifest, null, 2)}\n`,
     {
       mode: 0o600,
     },
   )
+  await rename(staging, dir)
   await pruneSnapshots(root, ctx.config.snapshotKeep)
   return dir
 }
@@ -784,10 +796,27 @@ async function pullLocked(ctx, options) {
   // A healthy remote manifest always references at least package.json; an
   // empty one means an empty or corrupt repository and is never applied.
   assertRemoteManifestPlausible(remote.syncedManifest, channel)
+  // The manifest's plugin table must match the package.json it ships: a
+  // disagreement means the repository was written by a broken client.
+  assertManifestPlugins(remote.syncedManifest, remote.syncedFiles, channel)
+
+  // Bind an apply to the commit the user reviewed. The card sends the commit
+  // from its preview; a remote that moved in between is a different change set.
+  if (options.apply === true && options.expectedCommit) {
+    if (String(options.expectedCommit) !== String(remote.commit)) {
+      throw new SyncError(
+        'E_STALE_PREVIEW',
+        `the remote moved since the preview (reviewed ${shortHash(options.expectedCommit)}, now ${shortHash(remote.commit)}); `
+          + 'preview the pull again and review the new change set before applying it.',
+      )
+    }
+  }
 
   // Compare against the normalized copy: this machine's own connection row is
   // machine-local, so its presence must never look like drift.
   const diff = diffManifests(local.manifest, remote.syncedManifest)
+  const risk = pullRisk(local.manifest, remote.syncedManifest)
+  const destructive = isDestructivePull(risk)
   const managed = managedSet(ctx.config, channel)
   const localChanged = state ? changedFiles(state.files, shaMap(local.manifest.files), managed) : []
   const connectionRow = localConnectionRow(ctx, local, channel)
@@ -818,6 +847,8 @@ async function pullLocked(ctx, options) {
       profile: ctx.profile,
       channel,
       adopted,
+      commit: remote.commit,
+      destructive: false,
     }
   }
 
@@ -844,6 +875,13 @@ async function pullLocked(ctx, options) {
         'Applying will overwrite them; a snapshot is written first.',
       )
     }
+    if (destructive) {
+      lines.push(
+        '',
+        `warning: applying would remove ${risk.droppedCount} of ${risk.beforeCount} plugins (${describeDropped(risk)}).`,
+        'The pull is refused unless forced: check the remote branch first, or push from this machine.',
+      )
+    }
     lines.push('', 'Nothing written. Run /sync-pull apply to apply these files locally.')
     return {
       text: lines.join('\n'),
@@ -852,26 +890,23 @@ async function pullLocked(ctx, options) {
       profile: ctx.profile,
       channel,
       adopted,
+      commit: remote.commit,
+      destructive,
     }
   }
 
-  const snapshot = await snapshotLocal(ctx, local)
+  // Refuse a pull that would wipe the plugin list, then always leave a
+  // rollback copy behind: `snapshot: false` still yields a snapshot for an
+  // apply, because the profile's own files exist nowhere else on this machine.
+  assertPullSafe(local.manifest, remote.syncedManifest, { force: options.force === true })
+  const snapshot = await snapshotLocal(ctx, local, { force: true })
+  const quarantine = join(snapshot, 'removed')
   const prefix = `profiles/${channel}/`
   const owned = new Set(Object.keys(state?.files ?? {}))
   const kept = []
+  const removed = []
   const connectionPath = `${prefix}${CONNECTION_FILE}`
   const localConnectionText = connectionRow === null ? '' : String(local.files.get(connectionPath)?.toString('latin1') ?? '')
-  // Defensive snapshot: a pull that deletes managed files must always leave a
-  // rollback copy, even when snapshotting is configured off.
-  const deletions = plannedDeletions({
-    allowedNames: allowedFiles(ctx.config.includeLockfile, ctx.config.includeWorkspace),
-    syncedFiles: remote.syncedFiles,
-    owned,
-    channel,
-  })
-  if (snapshotAlways(ctx, deletions, snapshot !== null)) {
-    await snapshotLocal({ ...ctx, config: { ...ctx.config, snapshot: true } }, local)
-  }
   // Baseline for the post-install unmanaged-content check.
   const entriesBeforeInstall = await listProfileEntries(ctx.profileDir)
   try {
@@ -906,9 +941,11 @@ async function pullLocked(ctx, options) {
         throw new SyncError('E_APPLY', `written file does not match the remote: ${sanitizeText(safe, 160)}`)
       }
     }
-    // Converge only files this machine previously synced. A local file the
-    // remote never managed (for example a local cordis.patch.yml on a fresh
-    // machine) is kept and reported instead of being deleted.
+    // Converge only files this machine previously synced, and never delete a
+    // base file the remote omits: a remote manifest without cordis.patch.yml
+    // (pushed by a machine that had already lost it) would otherwise strip
+    // this profile's plugin patch. That is the exact 2026-11-20 failure shape.
+    // Removals are quarantined in the snapshot instead of being destroyed.
     for (const name of allowedFiles(ctx.config.includeLockfile, ctx.config.includeWorkspace)) {
       const path = `${prefix}${name}`
       // The file was just written above when the remote manages it.
@@ -916,11 +953,19 @@ async function pullLocked(ctx, options) {
       // This machine holds its own connection row in the file: deleting it
       // would drop the Git remote, so keep and report it instead.
       if (connectionRow !== null && path === connectionPath) {
-        kept.push(name)
+        kept.push(`${name} (holds this machine's connection row)`)
         continue
       }
-      if (owned.has(path)) await rm(join(ctx.profileDir, assertDeletable(name)), { force: true })
-      else if (await pathExists(join(ctx.profileDir, name))) kept.push(name)
+      // The remote copy is incomplete; the local copy is the only good one.
+      if (BASE_FILES.includes(name)) {
+        kept.push(`${name} (the remote copy does not carry it)`)
+        continue
+      }
+      if (owned.has(path)) {
+        if (await quarantineManagedFile(ctx.profileDir, quarantine, name)) removed.push(name)
+      } else if (await pathExists(join(ctx.profileDir, name))) {
+        kept.push(`${name} (not managed by the remote copy)`)
+      }
     }
   } catch (error) {
     let restoreNote = 'local files were restored'
@@ -939,24 +984,35 @@ async function pullLocked(ctx, options) {
     diff.plugins.changed.length > 0
 
   let install = null
+  let installRefusal = null
+  let prunedEntries = []
+  let missing = []
   if (packageChanged) {
     // Guard the package manager against a half-destroyed profile: pnpm would
     // prune node_modules in a workspace without projects. The pull itself may
     // legitimately restore a missing package.json, so the guard runs after the
     // write phase — only the install step is refused.
     await assertProfileWritable(ctx.profileDir)
-    install = await reconcilePackages(ctx, { signal: options.signal })
+    // Second gate: a manifest that lost (almost) every dependency would make
+    // `pnpm install` prune node_modules down to nothing. Skip the install and
+    // report it; a human decides whether the shrinkage is intended.
+    installRefusal = installRisk(local.manifest, remote.syncedManifest)
+    if (installRefusal) {
+      install = { ok: false, skipped: true, code: installRefusal.code, tool: null, output: '' }
+    } else {
+      install = await reconcilePackages(ctx, { signal: options.signal })
+      // The package manager is the only other writer in this directory; if it
+      // removed content the plugin does not manage, report it before claiming
+      // success.
+      prunedEntries = detectUnmanagedRemoval(entriesBeforeInstall, await listProfileEntries(ctx.profileDir))
+    }
+    // Verify that what the manifest promises is actually installed: a pruned
+    // node_modules only surfaces as a broken next start otherwise.
+    missing = await missingDependencies(ctx.profileDir, remote.syncedManifest)
   }
   // A skipped reconcile is a deliberate default, not a failure — but the
   // dependencies are now missing on disk, so the next step has to be named.
   const needsInstall = packageChanged && (install === null || install.skipped === true)
-
-  // The package manager runs with the profile's own manifest; if it removed
-  // content the plugin does not manage, say so loudly instead of silence.
-  let prunedEntries = []
-  if (install?.ok && !install.skipped) {
-    prunedEntries = detectUnmanagedRemoval(entriesBeforeInstall, await listProfileEntries(ctx.profileDir))
-  }
 
   const warning = await recordState(ctx.config, ctx.profile, {
     commit: remote.commit,
@@ -971,13 +1027,23 @@ async function pullLocked(ctx, options) {
     '',
     summarizeDiff(diff),
     '',
-    `snapshot: ${snapshot ?? 'disabled'}`,
+    `snapshot: ${snapshot}`,
   ]
-  if (deletions.length > 0) {
-    lines.push(`deleted: ${deletions.join(', ')} (rollback copy in the snapshot)`)
+  if (removed.length > 0) {
+    lines.push(
+      `quarantined: ${removed.join(', ')} (moved to ${quarantine}, not deleted; copy back to restore)`,
+    )
+  }
+  if (destructive) {
+    lines.push(
+      `warning: forced pull removed ${risk.droppedCount} of ${risk.beforeCount} plugins (${describeDropped(risk)})`,
+    )
   }
   if (prunedEntries.length > 0) {
-    lines.push(`warning: the package manager removed unmanaged entries: ${prunedEntries.join(', ')}`)
+    lines.push(
+      `warning: the package manager removed entries this plugin does not manage: ${prunedEntries.join(', ')}`,
+      `rollback: ${snapshot}`,
+    )
   }
   if (channel !== ctx.profile) {
     lines.push(
@@ -991,19 +1057,30 @@ async function pullLocked(ctx, options) {
     lines.push('preserved: config-sync row (this machine)')
   }
   if (kept.length > 0) {
-    lines.push(`kept locally: ${kept.join(', ')} (not previously synced by this machine)`)
+    lines.push(`kept locally: ${kept.join(', ')}`)
   }
-  if (install) {
-    if (!install.ok) {
+  if (installRefusal) {
+    lines.push(
+      `packages: ${installRefusal.code} — ${installRefusal.message}`,
+      `next: add the plugins you still want to ${ctx.profile}, then push; the previous files are in ${snapshot}`,
+    )
+  } else if (install) {
+    if (!install.ok && !install.skipped) {
       lines.push('packages: automatic install failed; see output below', tail(install.output, 12))
     } else if (!install.skipped) {
       lines.push(`packages: installed with ${install.tool}`)
     }
   }
-  if (needsInstall) {
+  if (needsInstall && !installRefusal) {
     lines.push(
       `packages: manifest changed but dependencies were not installed (reconcile: ${ctx.config.reconcile})`,
       `next: dsh plugin --profile ${ctx.profile} install`,
+    )
+  }
+  if (missing.length > 0) {
+    const shown = missing.slice(0, 10).join(', ')
+    lines.push(
+      `warning: declared dependencies missing from node_modules: ${shown}${missing.length > 10 ? ` (+${missing.length - 10} more)` : ''}`,
     )
   }
   if (diff.plugins.manual.length > 0) {
@@ -1020,5 +1097,9 @@ async function pullLocked(ctx, options) {
     profile: ctx.profile,
     channel,
     adopted,
+    commit: remote.commit,
+    snapshot,
+    destructive,
+    missing,
   }
 }

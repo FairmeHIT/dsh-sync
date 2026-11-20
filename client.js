@@ -356,6 +356,15 @@ window.__ModuleLoader__.load({
       var view = state[0]
       var setView = state[1]
 
+      var busyPoll = React.useRef(null)
+      var scheduleBusyPoll = function () {
+        if (busyPoll.current) return
+        busyPoll.current = setTimeout(function () {
+          busyPoll.current = null
+          load(true, false)
+        }, 2000)
+      }
+
       var load = React.useCallback(async function (preserveResult, restoreBusy) {
         setView(function (current) {
           return {
@@ -369,17 +378,26 @@ window.__ModuleLoader__.load({
         })
         try {
           var data = await request(ROUTES.status)
+          var busyNow = data.busy === true
           setView(function (current) {
             // Remount recovery: the host reports an in-flight sync; show the
             // busy state instead of an idle card over a running operation.
-            if (data.busy === true) {
+            if (busyNow) {
               return { ...current, loading: false, busy: true, busyAction: data.activity && data.activity.action ? data.activity.action : 'sync', data: { ...current.data, ...data }, error: null }
             }
             if (restoreBusy !== false && data.activity && data.activity.finishedAt && data.activity.text) {
+              // A failed run must not be rendered as a normal result: the card
+              // would show a green-ish box containing an error message.
+              if (data.activity.ok === false) {
+                return { ...current, loading: false, busy: false, busyAction: '', data: data, error: { code: 'E_LAST_ACTIVITY', message: data.activity.text }, notice: '', result: '' }
+              }
               return { ...current, loading: false, busy: false, busyAction: '', data: data, error: null, result: current.result || data.activity.text }
             }
             return { ...current, loading: false, busy: false, busyAction: '', data: data, error: null }
           })
+          // A sync running elsewhere ends without any event this card sees;
+          // keep polling while the host reports busy so the card unlocks.
+          if (busyNow) scheduleBusyPoll()
         } catch (error) {
           setView(function (current) {
             return { ...current, loading: false, busy: false, error: error }
@@ -414,6 +432,17 @@ window.__ModuleLoader__.load({
           loadConfig()
         },
         [load],
+      )
+
+      // Stop the busy poll when the card unmounts.
+      React.useEffect(
+        function () {
+          return function () {
+            if (busyPoll.current) clearTimeout(busyPoll.current)
+            busyPoll.current = null
+          }
+        },
+        [],
       )
 
       // More starts expanded, so the version row is visible immediately. Run
@@ -772,6 +801,11 @@ window.__ModuleLoader__.load({
                 channel: String(data.channel || ''),
                 profile: String(data.profile || (current.data && current.data.profile) || ''),
                 adopted: data.adopted === true,
+                // Bind the apply to the commit that was previewed: the server
+                // refuses when the branch moved, so a confirm cannot write
+                // content the user never saw.
+                commit: String(data.commit || ''),
+                destructive: data.destructive === true,
               },
             }
           })
@@ -809,10 +843,13 @@ window.__ModuleLoader__.load({
         setView(function (current) { return { ...current, dialog: null } })
       }
 
+      var confirming = false
+
       async function confirmDialog() {
         var dialog = view.dialog
-        if (!dialog || view.busy) return
+        if (!dialog || view.busy || confirming) return
         var pull = dialog.kind === 'pull'
+        confirming = true
         setView(function (current) {
           return { ...current, busy: true, busyAction: pull ? 'apply' : 'push', error: null, notice: '', result: '' }
         })
@@ -820,7 +857,11 @@ window.__ModuleLoader__.load({
           var data = await request(pull ? ROUTES.pull : ROUTES.push, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(pull ? { apply: true } : { message: view.message }),
+            body: JSON.stringify(
+              pull
+                ? { apply: true, expectedCommit: dialog.commit || '', force: dialog.destructive === true }
+                : { message: view.message },
+            ),
             timeoutMs: 600000,
           })
           var text = data.text || ''
@@ -841,6 +882,8 @@ window.__ModuleLoader__.load({
             }
             return { ...current, busy: false, busyAction: '', error: error, notice: '' }
           })
+        } finally {
+          confirming = false
         }
       }
 

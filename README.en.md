@@ -28,7 +28,7 @@ Our trade-offs:
 | Support any profile, including `desktop` | Desktop users are a first-class case |
 | Refuse a conflicting push instead of auto-merging | Config files are whole-document semantics; make the user pull or explicitly force rather than silently overwrite another machine |
 | Read Git blobs; verify staged and committed bytes | Line endings, `.gitattributes` and `.gitignore` must not change managed content |
-| Pull deletes only files this machine previously synced | A first pull must not remove a local `cordis.patch.yml` or other unmanaged files |
+| Pull quarantines instead of deleting | A removed managed file is moved into the snapshot's `removed/` directory, and `package.json` / `cordis.patch.yml` are never removed |
 | `reconcile: install` by default | Pulled dependencies are installed automatically; set `none` for an untrusted repository |
 | The synced copy drops this machine's `config-sync` row | The repository URL is machine-local; the row never reaches the remote, so it can never be written back over local settings |
 | Host tools + Web UI | Commands/tools work in desktop and headless; the web shell gets a Settings page and plugin-page card |
@@ -217,6 +217,11 @@ The card shows one meta line (remote · branch · profile), **Pull** and **Push*
 - **Push** opens its confirmation dialog immediately (with an optional commit message) and pushes only after **Confirm**; cancel sends no request. The UI does not expose force; use `/sync-push --force` when needed.
 - **Refresh** and **Test connection** live under **More**: refresh is read-only; test connection writes and then removes a `.config-sync-probe` marker file on the remote, never touching synced content, and prints `Connection test passed`.
 - **Apply pull** writes a snapshot first, then overwrites managed local files. This machine's `config-sync` row is preserved.
+- **A pull never removes `package.json` or `cordis.patch.yml`**: when the remote manifest does not carry them, the local copy stays and the output says `kept locally: …`. Any other managed file the remote no longer carries is moved to
+  `config-sync/snapshots/<profile>/<stamp>/removed/` instead of being deleted, and every apply writes a snapshot even when `snapshot: false` is configured.
+- A pull that would drop every plugin on this machine, or at least half of them while at least five were present, is refused with
+  `E_DESTRUCTIVE_PULL`; once you have confirmed the remote really is meant to be emptied, re-run with `/sync-pull apply --force` (or the card's forced confirmation).
+- Preview and apply are bound together: the preview returns the remote commit and the apply sends the same one; if the branch moved in between, the pull fails with `E_STALE_PREVIEW` instead of writing content you did not review.
 - Apply pull installs dependencies by default (`reconcile: install`). When the pull changed `package.json`,
   a lockfile or the plugin list, the plugin runs `pnpm install` (the DSH-bundled node+pnpm runtime first,
   then pnpm/corepack/npm from PATH) in the profile

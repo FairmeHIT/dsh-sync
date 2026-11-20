@@ -106,6 +106,9 @@ describe('browser bundle', () => {
       useCallback(callback) {
         return callback
       },
+      useRef(value) {
+        return { current: value }
+      },
     }
     let exported
     const registered = []

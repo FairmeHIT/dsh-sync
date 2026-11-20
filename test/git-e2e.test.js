@@ -979,16 +979,23 @@ test('end-to-end: a pull that would delete an owned file always snapshots', { sk
   await push(configA, { message: 'drop lockfile' })
 
   const text = await pull(configB, { apply: true })
-  assert.match(text, /deleted: pnpm-lock\.yaml/)
+  assert.match(text, /quarantined: pnpm-lock\.yaml/)
   await assert.rejects(() => readFile(join(homeB, 'profiles', 'demo', 'pnpm-lock.yaml')))
   // The defensive snapshot exists even though snapshot: false.
   const dirs = await snapshotDirs(homeB)
   assert.ok(dirs.length >= 1, 'a destructive pull must leave a rollback snapshot')
+  const lastStamp = dirs[dirs.length - 1]
   const restored = await readFile(
-    join(homeB, 'config-sync', 'snapshots', 'demo', dirs[dirs.length - 1], 'profiles', 'demo', 'pnpm-lock.yaml'),
+    join(homeB, 'config-sync', 'snapshots', 'demo', lastStamp, 'profiles', 'demo', 'pnpm-lock.yaml'),
     'utf8',
   )
   assert.ok(restored.includes('lockfileVersion'))
+  // The removal is a move, not a delete: the file is parked beside the snapshot.
+  const quarantined = await readFile(
+    join(homeB, 'config-sync', 'snapshots', 'demo', lastStamp, 'removed', 'pnpm-lock.yaml'),
+    'utf8',
+  )
+  assert.ok(quarantined.includes('lockfileVersion'))
 })
 
 test('end-to-end: an empty-looking profile is never handed to the package manager', { skip }, async (t) => {

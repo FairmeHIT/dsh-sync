@@ -4,6 +4,65 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] - 2026-11-20
+
+### Fixed
+
+- **A pull can no longer remove `package.json` or `cordis.patch.yml`.** 0.7.6's
+  `E_REMOTE_EMPTY_MANIFEST` refused a manifest with *no* files, but a remote that still carried
+  `package.json` and omitted `cordis.patch.yml` — exactly what a branch pushed from a profile that
+  had already lost its patch looks like — was accepted, and the converge loop deleted the local
+  patch. Both base files are now kept and reported (`kept locally: cordis.patch.yml`) whenever the
+  remote copy omits them.
+- **Managed files are quarantined, not deleted.** A pull only removes files this machine
+  previously synced, and moves them into
+  `config-sync/snapshots/<profile>/<stamp>/removed/` instead of unlinking them; the report names
+  the directory and the snapshot.
+- **Every apply writes a rollback snapshot, even with `snapshot: false`.** The snapshot is built
+  beside its final name and published with a rename, so an interrupted pull cannot leave a partial
+  rollback point.
+- **A destructive pull is refused until forced.** `E_DESTRUCTIVE_PULL` when the remote would drop
+  every plugin, or at least half of them while at least five were present. The dry-run preview
+  names the removal; `--force` (`/sync-pull apply --force`, the tool's `force: true`, or the card's
+  forced confirmation) overrides it.
+- **The package install is gated on content.** `E_INSTALL_EMPTY` / `E_INSTALL_SHRINK` skip the
+  automatic install when the pulled manifest loses every dependency or at least half of them
+  (small profiles are not judged), instead of letting `pnpm install` prune `node_modules`. After
+  an install, every dependency the manifest declares is checked against `node_modules` and any
+  missing package is reported.
+- **Preview and apply are bound together.** The dry-run returns the remote commit; applying with
+  `expectedCommit` (the card sends the reviewed one) fails with `E_STALE_PREVIEW` if the branch
+  moved in between, so a different diff than the one that was reviewed cannot be written.
+- **Manifest and `package.json` are cross-checked.** A manifest whose `plugins` object disagrees
+  with the `package.json` it ships fails with `E_MANIFEST_CONFLICT`.
+
+### Fixed (concurrency and lifecycle)
+
+- **A live lock is never reclaimed.** Stale detection now uses the PID in the lock file: a live
+  process wins regardless of the file's age, a lock without a PID is stale only after a short
+  grace period. Reclaiming renames the file aside and verifies the owner before taking it, and the
+  owner token prevents a slow caller from deleting a successor's lock. `isLocked` is read-only.
+- **Plugin updates and pulls are serialized.** `updateBundle` / `installBundle` run under the same
+  lock as a pull, so the two writers can no longer rewrite `package.json` and `node_modules` at the
+  same time.
+- **A running update is not reported as failed after three minutes.** The update state carries a
+  heartbeat written every 15 s; a run is stale only when the heartbeat stops for 60 s.
+
+### Changed
+
+- The pull report now includes `snapshot`, `destructive`, `missing` and the quarantined files; the
+  card polls while the server reports a busy sync, renders a failed last activity as an error, and
+  guards the confirm button against a double submit.
+- `SECURITY.md` no longer claims `reconcile` defaults to `none` (it defaults to `install`, and the
+  install is gated as described above).
+
+### Tests
+
+- New `test/incident-regression.test.js` reproduces the 2026-11-20 shape end to end: a remote
+  without `cordis.patch.yml` leaves the local patch untouched, a pull that would wipe the plugin
+  list is refused and leaves a snapshot when forced, a stale `expectedCommit` is rejected, and a
+  live lock is neither reclaimed nor deleted.
+
 ## [0.7.6] - 2026-11-20
 
 ### Added

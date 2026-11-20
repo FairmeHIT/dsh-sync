@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PACKAGE_NAME, resolveDshHome } from './config.js'
 import { SyncError } from './errors.js'
+import { withLock } from './lock.js'
 import { detectProfile, readJson, writeFileAtomic } from './paths.js'
 /** Where the outcome of the last update lives, beside activity.json. */
 export const UPDATE_STATE_FILE = 'update.json'
@@ -12,8 +13,14 @@ const DEFAULT_BRANCH = 'main'
 const RAW_HOST = 'https://raw.githubusercontent.com'
 const CHECK_TIMEOUT_MS = 15_000
 const GIT_TIMEOUT_MS = 20_000
-/** A "running" record older than this lost its installer; report it as failed. */
-const STALE_RUNNING_MS = 3 * 60_000
+/**
+ * A "running" record whose heartbeat stopped is reported as failed: the
+ * installer died with the host. A live install keeps answering, so a slow but
+ * healthy installation is never mistaken for a crashed one.
+ */
+const STALE_RUNNING_MS = 60_000
+/** How often a running install refreshes its record. */
+const HEARTBEAT_MS = 15_000
 const OWN_PACKAGE = new URL('../package.json', import.meta.url)
 
 /**
@@ -107,9 +114,11 @@ export async function readUpdateState(config) {
   if (!raw || typeof raw !== 'object' || raw.schemaVersion !== UPDATE_STATE_VERSION) return null
   const status = raw.status === 'running' || raw.status === 'done' || raw.status === 'failed' ? raw.status : 'failed'
   const startedAt = typeof raw.startedAt === 'string' ? raw.startedAt : null
-  // A crash or a killed host leaves "running" behind forever; the card would
-  // poll a state nobody updates, so an old record reads as an interrupted run.
-  const stale = status === 'running' && startedAt !== null && Date.now() - Date.parse(startedAt) > STALE_RUNNING_MS
+  const heartbeatAt = typeof raw.heartbeatAt === 'string' ? raw.heartbeatAt : null
+  // A crash or a killed host stops the heartbeat; until then the install is
+  // alive even when it takes minutes.
+  const lastBeat = Date.parse(heartbeatAt ?? startedAt ?? '')
+  const stale = status === 'running' && Number.isFinite(lastBeat) && Date.now() - lastBeat > STALE_RUNNING_MS
   return {
     status: stale ? 'failed' : status,
     from: typeof raw.from === 'string' ? raw.from : '',
@@ -355,17 +364,42 @@ function installOutcome(result) {
  */
 export async function runUpdate(config, manager, target) {
   const startedAt = target.startedAt
+  // Keep the record alive while the manager installs: readUpdateState treats a
+  // running record without a recent heartbeat as a crashed installer.
+  const heartbeat = setInterval(() => {
+    writeUpdateState(config, {
+      status: 'running',
+      from: target.from,
+      to: target.to,
+      spec: target.spec,
+      startedAt,
+      heartbeatAt: new Date().toISOString(),
+      finishedAt: null,
+      application: '',
+      message: '',
+    }).catch(() => {})
+  }, HEARTBEAT_MS)
   try {
-    const result = target.mode === 'update' && typeof manager.updateBundle === 'function'
-      ? await manager.updateBundle(PACKAGE_NAME, target.to, { spec: target.spec })
-      : await manager.installBundle(target.spec, { expected: { name: PACKAGE_NAME, version: target.to } })
-    const outcome = installOutcome(result)
+    // The manager rewrites package.json and node_modules — the same files a
+    // pull writes and installs. One lock keeps the two from tearing the
+    // profile; an install may legitimately take a while, hence the longer wait.
+    const outcome = await withLock(
+      resolveDshHome(config),
+      async () => {
+        const result = target.mode === 'update' && typeof manager.updateBundle === 'function'
+          ? await manager.updateBundle(PACKAGE_NAME, target.to, { spec: target.spec })
+          : await manager.installBundle(target.spec, { expected: { name: PACKAGE_NAME, version: target.to } })
+        return installOutcome(result)
+      },
+      { waitMs: 15 * 60_000 },
+    )
     await writeUpdateState(config, {
       status: outcome.ok ? 'done' : 'failed',
       from: target.from,
       to: target.to,
       spec: target.spec,
       startedAt,
+      heartbeatAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
       application: outcome.application,
       message: outcome.message,
@@ -383,6 +417,8 @@ export async function runUpdate(config, manager, target) {
       message: error?.message ?? String(error),
     })
     return { ok: false, application: '', message: error?.message ?? String(error) }
+  } finally {
+    clearInterval(heartbeat)
   }
 }
 

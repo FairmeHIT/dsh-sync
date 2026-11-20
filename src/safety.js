@@ -1,7 +1,8 @@
-import { readdir, stat } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SyncError } from './errors.js'
-import { allowedFiles, validateSyncPath } from './manifest.js'
+import { allowedFiles, parsePackageJson, validateSyncPath } from './manifest.js'
+import { pathExists } from './paths.js'
 import { sanitizeText } from './text.js'
 
 /** Files the plugin may ever delete from a profile directory. */
@@ -155,4 +156,167 @@ export function plannedDeletions({ allowedNames, syncedFiles, owned, channel }) 
     if (owned.has(path)) out.push(name)
   }
   return out
+}
+
+/**
+ * Move a managed file out of the profile instead of deleting it. The plugin
+ * never destroys the only copy of anything: removals are parked in the
+ * snapshot directory, so even a pull that was forced through can be undone by
+ * copying the files back.
+ */
+const QUARANTINE_FALLBACK = new Set(['EXDEV', 'EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY', 'EEXIST'])
+
+export async function quarantineManagedFile(profileDir, quarantineDir, name) {
+  const safe = assertDeletable(name)
+  const from = join(profileDir, safe)
+  if (!(await pathExists(from))) return false
+  await mkdir(quarantineDir, { recursive: true })
+  const to = join(quarantineDir, safe)
+  try {
+    await rename(from, to)
+  } catch (error) {
+    if (!QUARANTINE_FALLBACK.has(error?.code)) throw error
+    await copyFile(from, to)
+    await rm(from, { force: true })
+  }
+  return true
+}
+
+/** The two halves of a profile's plugin list, as the manifest records them. */
+function pluginLists(manifest) {
+  const plugins = manifest?.plugins
+  return {
+    bundles: Array.isArray(plugins?.bundles) ? plugins.bundles.map(String) : [],
+    dependencies: Object.keys(plugins?.dependencies ?? {}).sort(),
+  }
+}
+
+/**
+ * What applying a remote manifest would remove compared with what this machine
+ * has right now. Used both to warn in a preview and to refuse an apply.
+ */
+export function pullRisk(beforeManifest, afterManifest) {
+  const before = pluginLists(beforeManifest)
+  const after = pluginLists(afterManifest)
+  const afterBundles = new Set(after.bundles)
+  const afterDependencies = new Set(after.dependencies)
+  const droppedBundles = before.bundles.filter((name) => !afterBundles.has(name))
+  const droppedDependencies = before.dependencies.filter((name) => !afterDependencies.has(name))
+  const beforeCount = before.bundles.length + before.dependencies.length
+  const afterCount = after.bundles.length + after.dependencies.length
+  const droppedCount = droppedBundles.length + droppedDependencies.length
+  return {
+    beforeCount,
+    afterCount,
+    droppedCount,
+    droppedBundles,
+    droppedDependencies,
+    /** Nothing would be left to install: the profile loses every plugin. */
+    emptiesProfile: beforeCount > 0 && afterCount === 0,
+    /** More than half of the plugin list disappears in one pull. */
+    removesHalf: beforeCount >= 5 && droppedCount * 2 >= beforeCount,
+  }
+}
+
+export function isDestructivePull(risk) {
+  return risk.emptiesProfile === true || risk.removesHalf === true
+}
+
+/** Bounded, sanitized list of what a destructive pull would drop. */
+export function describeDropped(risk, limit = 8) {
+  const names = [...risk.droppedDependencies, ...risk.droppedBundles].map((name) => sanitizeText(name, 80))
+  if (names.length === 0) return 'no plugins'
+  const head = names.slice(0, limit).join(', ')
+  return names.length > limit ? `${head}, +${names.length - limit} more` : head
+}
+
+/**
+ * Refuse a pull that would wipe the profile's plugins. This is the exact shape
+ * of the 2026-11-20 incident: a remote manifest that looked readable but
+ * carried no plugins, applied over a healthy profile. A remote is untrusted
+ * input, and a profile that is emptied is only recoverable from a backup, so
+ * the removal must be explicit (`force`) rather than accidental.
+ */
+export function assertPullSafe(beforeManifest, afterManifest, { force = false } = {}) {
+  const risk = pullRisk(beforeManifest, afterManifest)
+  if (!isDestructivePull(risk) || force === true) return risk
+  const what = risk.emptiesProfile
+    ? 'it would remove every plugin from this profile'
+    : `it would remove ${risk.droppedCount} of ${risk.beforeCount} plugins`
+  throw new SyncError(
+    'E_DESTRUCTIVE_PULL',
+    `refusing the pull: ${what} (${describeDropped(risk)}). `
+      + 'The remote branch may be empty, stale or from a fresh profile. '
+      + 'Write this machine\'s configuration first (/sync-push), or re-run with force to accept the removal.',
+    { risk },
+  )
+}
+
+/**
+ * A package manager must never run with a manifest that lost most of its
+ * dependencies: `pnpm install` prunes node_modules down to whatever the new
+ * manifest declares, so an emptied package.json silently uninstalls every
+ * plugin. Returns null when installing is safe.
+ */
+export function installRisk(beforeManifest, afterManifest) {
+  const before = pluginLists(beforeManifest)
+  const after = pluginLists(afterManifest)
+  if (before.dependencies.length === 0) return null
+  const afterDependencies = new Set(after.dependencies)
+  const dropped = before.dependencies.filter((name) => !afterDependencies.has(name))
+  if (after.dependencies.length === 0) {
+    return {
+      code: 'E_INSTALL_EMPTY',
+      message: 'the new manifest declares no plugins; automatic install skipped so node_modules is not pruned',
+      dependencies: dropped,
+    }
+  }
+  if (before.dependencies.length >= 5 && dropped.length * 2 >= before.dependencies.length) {
+    return {
+      code: 'E_INSTALL_SHRINK',
+      message: `the new manifest drops ${dropped.length} of ${before.dependencies.length} dependencies; automatic install skipped so node_modules is not pruned`,
+      dependencies: dropped,
+    }
+  }
+  return null
+}
+
+/**
+ * Dependencies the manifest declares but node_modules does not contain. A
+ * profile that lost packages looks installed until the next restart fails, so
+ * the pull reports them instead of claiming success.
+ */
+export async function missingDependencies(profileDir, manifest) {
+  const { dependencies } = pluginLists(manifest)
+  const missing = []
+  for (const name of dependencies) {
+    const segments = name.split('/')
+    if (!(await pathExists(join(profileDir, 'node_modules', ...segments)))) missing.push(name)
+  }
+  return missing
+}
+
+/**
+ * The manifest's plugin table must agree with the package.json it ships.
+ * A manifest that claims dependencies its package.json does not declare (or
+ * the other way round) is corrupt; applying it would delete or mis-install.
+ */
+export function assertManifestPlugins(manifest, files, channel) {
+  const prefix = `profiles/${channel}/`
+  if (!files.has(`${prefix}package.json`)) return
+  const parsed = parsePackageJson(files)
+  const declared = pluginLists(manifest)
+  const sameBundles =
+    parsed.bundles.length === declared.bundles.length
+    && parsed.bundles.every((name) => declared.bundles.includes(name))
+  const parsedDependencies = Object.keys(parsed.dependencies).sort()
+  const sameDependencies =
+    parsedDependencies.length === declared.dependencies.length
+    && parsedDependencies.every((name, index) => name === declared.dependencies[index])
+  if (sameBundles && sameDependencies) return
+  throw new SyncError(
+    'E_MANIFEST_CONFLICT',
+    `remote manifest.json disagrees with ${prefix}package.json about the installed plugins; refusing to apply it. `
+      + 'Push again from a machine whose profile is intact, or repair manifest.json by hand.',
+  )
 }

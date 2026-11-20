@@ -196,6 +196,15 @@ dsh plugin --profile desktop add dsh-config-git-sync
 - 点击 **推送** 立即弹出确认框（可填写提交信息），确认后才推送；取消不会发出写入请求。UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
 - **刷新** 与 **测试连接** 在 **更多** 里：刷新只读；测试连接会向远端写入并随后删除一个 `.config-sync-probe` 标记文件，验证仓库可读可写，不触碰任何同步内容，通过后输出 `Connection test passed`。
 - **应用 Pull** 先写快照，再覆盖本地受管文件；本机 `config-sync` 行会被保留。
+- **Pull 不会删掉 `package.json` / `cordis.patch.yml`**：远端清单没带这两个文件时，本机副本保留，
+  输出里写 `kept locally: …`。其他受管文件如果远端不再携带，会被移到
+  `config-sync/snapshots/<profile>/<时间戳>/removed/`，而不是删除；快照每次 apply 都会写，
+  即使配置里 `snapshot: false`。
+- 一次 Pull 如果会让本机插件“清零”，或删掉一半以上（且原本至少 5 个），会被拒绝并报
+  `E_DESTRUCTIVE_PULL`；确认远端确实要清空后，用 `/sync-pull apply --force`
+  （或卡片里的强制确认）再执行一次。
+- 预览与写入是绑定的：预览返回远端 commit，应用时带上同一 commit；期间远端变了会报
+  `E_STALE_PREVIEW`，不会写入没审阅过的内容。
 - 插件依赖默认自动安装（`reconcile: install`）。如果这次 Pull 改了 `package.json`、锁文件或插件列表，
   会在 profile 目录里运行 `pnpm install`（优先用 DSH 自带的 node+pnpm 运行时，其次 PATH 上的 pnpm/corepack/npm 兜底），
   成功后输出 `packages: installed with <工具>`。
