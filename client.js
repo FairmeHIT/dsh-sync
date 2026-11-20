@@ -30,6 +30,7 @@ window.__ModuleLoader__.load({
           remote: '远端',
           branch: '分支',
           profile: 'Profile',
+          profileHint: '留空自动检测',
           refresh: '刷新',
           test: '测试连接',
           testBusy: '测试中…',
@@ -43,18 +44,18 @@ window.__ModuleLoader__.load({
           syncTitle: '同步',
           pullTitle: '从远端拉取',
           pullHint: '先预览远端改动，确认后再写入本机。',
-          preview: '预览 Pull',
+          preview: '预览拉取',
           previewTitle: '待应用的改动',
           applyHint: '应用前会自动写入本机快照。',
-          apply: '应用 Pull',
+          apply: '应用拉取',
           cancel: '取消',
           pushTitle: '推送到远端',
           pushHint: '把本机的 Profile 与插件清单发布到私有仓库。',
-          push: 'Push',
+          push: '推送',
           syncBusy: '同步中…',
-          pullBusy: 'Pull 中…',
-          pushBusy: 'Push 中…',
-          pushDone: 'Push 完成：远端已更新。',
+          pullBusy: '拉取中…',
+          pushBusy: '推送中…',
+          pushDone: '推送完成：远端已更新。',
           previewReady: '预览完成，尚未写入任何文件。',
           upToDate: '已是最新，没有需要同步的改动。',
           message: '提交信息（可选）',
@@ -102,6 +103,7 @@ window.__ModuleLoader__.load({
           remote: 'Remote',
           branch: 'Branch',
           profile: 'Profile',
+          profileHint: 'Leave blank to auto-detect',
           refresh: 'Refresh',
           test: 'Test connection',
           testBusy: 'Testing…',
@@ -343,12 +345,13 @@ window.__ModuleLoader__.load({
         draft: { remote: '', branch: 'main', profile: '' },
         configLoading: true,
         configReady: false,
-        configOpen: false,
+        configOpen: true,
         remoteHidden: false,
         saving: false,
         configError: null,
         dialog: null,
         update: null,
+        updateStarted: false,
       })
       var view = state[0]
       var setView = state[1]
@@ -413,8 +416,16 @@ window.__ModuleLoader__.load({
         [load],
       )
 
-      // The version check is lazy: the collapsed card stays quiet until the
-      // reader opens "More", so a normal visit never spends a GitHub request.
+      // More starts expanded, so the version row is visible immediately. Run
+      // the silent check once on mount instead of waiting for a toggle.
+      React.useEffect(
+        function () {
+          if (!view.configOpen || view.updateStarted) return
+          setView(function (current) { return { ...current, updateStarted: true } })
+          checkUpdate(true)
+        },
+        [],
+      )
 
       async function run(path, body, action) {
         setView(function (current) {
@@ -717,6 +728,7 @@ window.__ModuleLoader__.load({
             className: 'dcfg-input',
             value: view.draft[key],
             maxLength: key === 'remote' ? 2048 : key === 'branch' ? 200 : 100,
+            placeholder: key === 'profile' ? copy.profileHint : undefined,
             autoComplete: 'off',
             spellCheck: false,
             disabled: disabled || view.configLoading || !view.configReady,
@@ -975,7 +987,10 @@ window.__ModuleLoader__.load({
             onToggle: function (event) {
               var open = !!(event.target && event.target.open)
               setView(function (current) { return { ...current, configOpen: open } })
-              if (open && !view.update) checkUpdate(true)
+              if (open && !view.updateStarted) {
+                setView(function (current) { return { ...current, updateStarted: true } })
+                checkUpdate(true)
+              }
             },
           },
           h('summary', { className: 'dcfg-more-summary' }, copy.more),
@@ -1004,14 +1019,10 @@ window.__ModuleLoader__.load({
                 },
                 view.saving ? copy.saving : copy.save,
               ),
-            ),
-            view.configError ? h('div', { role: 'alert', className: 'dcfg-notice dcfg-notice-error' }, view.configError) : null,
-            h(
-              'div',
-              { className: 'dcfg-moreline' },
               h('button', { type: 'button', className: 'dcfg-btn', disabled: refreshDisabled, onClick: function () { load(false, false) } }, copy.refresh),
               h('button', { type: 'button', className: 'dcfg-btn', disabled: view.busy || view.saving, onClick: function () { run(ROUTES.probe, {}, 'probe') } }, copy.test),
             ),
+            view.configError ? h('div', { role: 'alert', className: 'dcfg-notice dcfg-notice-error' }, view.configError) : null,
             versionRow(),
             h(
               'details',

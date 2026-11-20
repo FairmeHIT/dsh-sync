@@ -77,18 +77,16 @@ function setup({ language = 'en', configFailure = false, update = null, updateSt
   return { calls, queue, configCalls, configQueue, updateCalls, updateQueue, stateCalls, stateQueue, render, find, text, button, notice, dialog, more, body, deadlines, expire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((fn) => fn()) } }
 }
 
-test('card starts minimal: actions visible, advanced settings collapsed, no version request', async () => {
+test('card opens with actions and expanded settings, and checks the version once', async () => {
   const ui = setup(); await tick()
   ui.button('Pull'); ui.button('Push')
-  assert.equal(ui.more().props.open, false)
-  assert.equal(ui.updateCalls.length, 0)
+  assert.equal(ui.more().props.open, true)
+  assert.equal(ui.updateCalls.length, 1)
   assert.equal(ui.find((n) => n.props.role === 'dialog'), undefined)
 })
 
-test('opening More lazily checks the version once', async () => {
+test('the version check runs once even when More is toggled', async () => {
   const ui = setup({ update: response({ ok: true, supported: true, current: '0.7.2', latest: '0.7.3', available: true }) }); await tick()
-  ui.more().props.onToggle({ target: { open: true } })
-  await tick()
   assert.equal(ui.updateCalls.length, 1)
   ui.button('Update to 0.7.3')
   ui.more().props.onToggle({ target: { open: true } })
@@ -223,12 +221,21 @@ test('a pull adoption dialog names the remote directory it will map', async () =
 
 test('the card speaks Chinese when the client does', async () => {
   const ui = setup({ language: 'zh-CN' }); await tick()
-  ui.button('拉取')
+  ui.button('拉取'); ui.button('推送')
   assert.equal(ui.text(ui.more().children[0]), '更多')
+  assert.equal(ui.find((n) => n.props['aria-label'] === 'Profile').props.placeholder, '留空自动检测')
   ui.queue.push(response({ ok: true, upToDate: true, text: 'Already up to date.' }), response(status))
   ui.button('拉取').props.onClick(); await tick()
   assert.equal(ui.dialog(), undefined)
   assert.equal(ui.notice(), '已是最新，没有需要同步的改动。')
+})
+
+test('save, refresh and test connection share one action row', async () => {
+  const ui = setup(); await tick()
+  const row = ui.find((n) => n.type === 'div' && n.props.className === 'dcfg-moreline' && /Save configuration/.test(ui.text(n)))
+  assert.ok(row, 'action row')
+  assert.match(ui.text(row), /Refresh/)
+  assert.match(ui.text(row), /Test connection/)
 })
 
 test('push confirmation input survives rerender and dialog cancel keeps the draft', async () => {
