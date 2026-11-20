@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { normalizeConfig } from '../src/config.js'
-import { ensureWorkTree, pushBranch } from '../src/git.js'
+import { ensureWorkTree, pushBranch, workDir } from '../src/git.js'
 import { pull, pullReport, push, status } from '../src/sync.js'
 import { readState } from '../src/state.js'
 import {
@@ -1032,5 +1032,38 @@ test('end-to-end: an empty-looking profile is never handed to the package manage
     // The plugin's own node_modules survives the guard: nothing was deleted.
     const entries = await readdir(profileDir)
     assert.ok(entries.includes('node_modules'))
+  })
+})
+
+test('end-to-end: a cache directory whose .git is broken is rebuilt, not reused', async (t) => {
+  const root = await setup()
+  await commitToRemote(root, { 'profiles/demo/package.json': pkg() })
+  const home = await makeMachine(root, 'home', {})
+  const cfg = config(root, home)
+
+  // The exact shape the 2026-11-20 cleanup left behind: the work cache exists
+  // with an empty .git, so the old "does .git exist" check skipped `git init`
+  // and the next `git config` died with "fatal: not in a git directory".
+  const dir = workDir(cfg)
+  await mkdir(join(dir, '.git'), { recursive: true })
+  await writeFile(join(dir, '.git', 'HEAD'), 'partial')
+
+  await t.test('ensureWorkTree initialises a fresh cache and keeps the broken one aside', async () => {
+    await ensureWorkTree(cfg)
+    const head = await git(dir, ['rev-parse', 'HEAD'])
+    assert.equal(head.trim(), (await remoteHead(root)).trim())
+    const gitDir = await git(dir, ['rev-parse', '--git-dir'])
+    assert.ok(['.', '.git', '.git/'].includes(gitDir.trim()), `unexpected git dir: ${gitDir}`)
+    const siblings = await readdir(join(home, 'config-sync', 'work'))
+    assert.ok(
+      siblings.some((name) => name.includes('.git-broken-')),
+      `expected a preserved broken cache, saw ${siblings.join(', ')}`,
+    )
+  })
+
+  await t.test('status works against the repaired cache', async () => {
+    const text = await status(cfg)
+    assert.match(text, /remote: /)
+    assert.match(text, /branch:\s+main/)
   })
 })

@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { requireBranch, resolveDshHome } from './config.js'
 import { SyncError } from './errors.js'
-import { ensureDir, pathExists } from './paths.js'
+import { ensureDir, nowStamp, pathExists } from './paths.js'
 import { sanitizeText } from './text.js'
 
 const MAX_BUFFER = 32 * 1024 * 1024
@@ -150,8 +151,28 @@ export async function ensureWorkTree(config, options = {}) {
   const branch = requireBranch(config)
   const dir = workDir(config)
   await ensureDir(dir)
+  // `.git` can exist without being a usable repository — an empty directory
+  // left by a crash or a partial copy, a swept index, a truncated config. The
+  // old check only tested existence, skipped `git init`, and the very next
+  // `git config` died with "fatal: not in a git directory". Probe the
+  // repository instead, and move a broken one aside (never delete it) so a
+  // fresh cache can be initialised.
   const hasGit = await pathExists(join(dir, '.git'))
-  if (!hasGit) {
+  if (hasGit) {
+    const probe = await run(config, ['rev-parse', '--git-dir'], {
+      cwd: dir,
+      allowFail: true,
+      signal: options.signal,
+    })
+    if (probe.code === 0 && probe.stdout) {
+      // usable cache; nothing to initialise
+    } else {
+      // Keep the broken repository beside the cache, not inside it: the fetch
+      // path runs `git clean -fdx`, which would delete an in-tree backup.
+      await rename(join(dir, '.git'), `${dir}.git-broken-${nowStamp()}`)
+    }
+  }
+  if (!(await pathExists(join(dir, '.git')))) {
     await run(config, ['init', '-b', branch, '.'], { cwd: dir, signal: options.signal })
   }
 

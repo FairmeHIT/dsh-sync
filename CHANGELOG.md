@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-11-20
+
+### Fixed
+
+- **A cache directory with a broken `.git` is rebuilt instead of re-used.** The cache was only
+  checked for the *presence* of `.git`; an empty or truncated `.git` (a crash, a swept directory,
+  a partially copied home) skipped `git init`, and the very next `git config` failed with
+  `fatal: not in a git directory`, so the card could not even read the status. The plugin now
+  probes `git rev-parse --git-dir`, moves a broken repository beside the cache
+  (`<key>.git-broken-<stamp>`, never deleted, and outside the tree so `git clean -fdx` cannot remove
+  it) and initialises a fresh cache.
+
 ## [0.7.7] - 2026-11-20
 
 ### Fixed
