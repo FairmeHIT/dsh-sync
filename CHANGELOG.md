@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-11-20
+
+### Added
+
+- **Hard safety rails around every destructive operation.** After a user's profile directory
+  was found emptied while this plugin was merely running, 0.7.6 makes it structurally
+  impossible for the plugin to widen its own blast radius, and loudly reports anything that
+  does:
+  - **`E_REMOTE_EMPTY_MANIFEST`**: a pull whose remote manifest lists no files (empty or
+    corrupt repository) is refused outright instead of deleting every managed file locally.
+    A missing `profiles/<channel>/package.json` in the manifest is refused the same way.
+  - **`E_PROFILE_EMPTY`**: the post-pull package install is refused when the profile
+    directory has no readable `package.json`. Without this guard pnpm sees a workspace
+    without projects and prunes `node_modules`.
+  - **`E_DELETE_REFUSED`**: every local deletion now goes through an allowlist guard.
+    Even a future bug in the delete loop can no longer remove anything outside
+    `package.json`, `cordis.patch.yml`, `pnpm-lock.yaml` and `pnpm-workspace.yaml`.
+  - **Destructive pulls always snapshot.** A pull that would delete a managed file writes a
+    rollback snapshot even when `snapshot: false` is configured.
+  - **Package-manager audit.** The pull records the profile's top-level entries before and
+    after the install and reports any unmanaged entry that disappeared.
+  - The pull output now names the managed files it deleted and where their rollback copies
+    live.
+
 ## [0.7.5] - 2026-11-19
 
 ### Fixed

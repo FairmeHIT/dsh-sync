@@ -25,6 +25,15 @@ import { withLock } from './lock.js'
 import { writeStart, writeFinish } from './activity.js'
 import { probeRemote } from './probe.js'
 import {
+  assertDeletable,
+  assertProfileWritable,
+  assertRemoteManifestPlausible,
+  detectUnmanagedRemoval,
+  listProfileEntries,
+  plannedDeletions,
+  snapshotAlways,
+} from './safety.js'
+import {
   allowedFiles,
   buildManifest,
   changedFiles,
@@ -595,7 +604,7 @@ async function snapshotLocal(ctx, local) {
 async function restoreLocal(ctx, localFiles, channel = ctx.profile) {
   const prefix = `profiles/${channel}/`
   for (const name of allowedFiles(ctx.config.includeLockfile, ctx.config.includeWorkspace)) {
-    if (!localFiles.has(`${prefix}${name}`)) await rm(join(ctx.profileDir, name), { force: true })
+    if (!localFiles.has(`${prefix}${name}`)) await rm(join(ctx.profileDir, assertDeletable(name)), { force: true })
   }
   for (const [path, data] of localFiles) {
     await writeFileAtomic(join(ctx.profileDir, path.slice(prefix.length)), data)
@@ -772,6 +781,10 @@ async function pullLocked(ctx, options) {
   }
   const local = await localState(ctx, { channel })
 
+  // A healthy remote manifest always references at least package.json; an
+  // empty one means an empty or corrupt repository and is never applied.
+  assertRemoteManifestPlausible(remote.syncedManifest, channel)
+
   // Compare against the normalized copy: this machine's own connection row is
   // machine-local, so its presence must never look like drift.
   const diff = diffManifests(local.manifest, remote.syncedManifest)
@@ -848,6 +861,19 @@ async function pullLocked(ctx, options) {
   const kept = []
   const connectionPath = `${prefix}${CONNECTION_FILE}`
   const localConnectionText = connectionRow === null ? '' : String(local.files.get(connectionPath)?.toString('latin1') ?? '')
+  // Defensive snapshot: a pull that deletes managed files must always leave a
+  // rollback copy, even when snapshotting is configured off.
+  const deletions = plannedDeletions({
+    allowedNames: allowedFiles(ctx.config.includeLockfile, ctx.config.includeWorkspace),
+    syncedFiles: remote.syncedFiles,
+    owned,
+    channel,
+  })
+  if (snapshotAlways(ctx, deletions, snapshot !== null)) {
+    await snapshotLocal({ ...ctx, config: { ...ctx.config, snapshot: true } }, local)
+  }
+  // Baseline for the post-install unmanaged-content check.
+  const entriesBeforeInstall = await listProfileEntries(ctx.profileDir)
   try {
     for (const [path, data] of remote.syncedFiles) {
       const safe = validateSyncPath(
@@ -893,7 +919,7 @@ async function pullLocked(ctx, options) {
         kept.push(name)
         continue
       }
-      if (owned.has(path)) await rm(join(ctx.profileDir, name), { force: true })
+      if (owned.has(path)) await rm(join(ctx.profileDir, assertDeletable(name)), { force: true })
       else if (await pathExists(join(ctx.profileDir, name))) kept.push(name)
     }
   } catch (error) {
@@ -913,10 +939,24 @@ async function pullLocked(ctx, options) {
     diff.plugins.changed.length > 0
 
   let install = null
-  if (packageChanged) install = await reconcilePackages(ctx, { signal: options.signal })
+  if (packageChanged) {
+    // Guard the package manager against a half-destroyed profile: pnpm would
+    // prune node_modules in a workspace without projects. The pull itself may
+    // legitimately restore a missing package.json, so the guard runs after the
+    // write phase — only the install step is refused.
+    await assertProfileWritable(ctx.profileDir)
+    install = await reconcilePackages(ctx, { signal: options.signal })
+  }
   // A skipped reconcile is a deliberate default, not a failure — but the
   // dependencies are now missing on disk, so the next step has to be named.
   const needsInstall = packageChanged && (install === null || install.skipped === true)
+
+  // The package manager runs with the profile's own manifest; if it removed
+  // content the plugin does not manage, say so loudly instead of silence.
+  let prunedEntries = []
+  if (install?.ok && !install.skipped) {
+    prunedEntries = detectUnmanagedRemoval(entriesBeforeInstall, await listProfileEntries(ctx.profileDir))
+  }
 
   const warning = await recordState(ctx.config, ctx.profile, {
     commit: remote.commit,
@@ -933,6 +973,12 @@ async function pullLocked(ctx, options) {
     '',
     `snapshot: ${snapshot ?? 'disabled'}`,
   ]
+  if (deletions.length > 0) {
+    lines.push(`deleted: ${deletions.join(', ')} (rollback copy in the snapshot)`)
+  }
+  if (prunedEntries.length > 0) {
+    lines.push(`warning: the package manager removed unmanaged entries: ${prunedEntries.join(', ')}`)
+  }
   if (channel !== ctx.profile) {
     lines.push(
       `adopted: remote directory "${sanitizeText(channel, 80)}" for local profile "${sanitizeText(ctx.profile, 80)}"`,

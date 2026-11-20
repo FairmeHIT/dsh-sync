@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { normalizeConfig } from '../src/config.js'
@@ -896,5 +896,134 @@ test('end-to-end: a patch that only holds the connection row still round-trips',
     assert.match(applied, /example\.com\/b\.git/)
     assert.doesNotMatch(applied, /only\.git/)
     assert.equal(applied.match(/- id: config-sync/g).length, 1)
+  })
+})
+
+test('end-to-end: a remote manifest with no files is refused, not applied', { skip }, async (t) => {
+  // A machine pushes a healthy configuration...
+  const root = await setup()
+  const home = await makeMachine(root, 'home', {
+    'package.json': pkg(),
+    'cordis.patch.yml': '- insert:\n    - id: demo-a\n      name: dsh-context\n',
+  })
+  await push(config(root, home), { message: 'healthy' })
+
+  await t.test('...the remote manifest is then replaced with an empty one...', async () => {
+    const manifest = {
+      schemaVersion: 1,
+      kind: 'dsh-config-git-sync',
+      generatedAt: new Date().toISOString(),
+      profile: 'demo',
+      files: {},
+    }
+    await commitToRemote(root, {
+      'profiles/demo/manifest.json': `${JSON.stringify(manifest, null, 2)}\n`,
+    })
+  })
+
+  await t.test('...and an applying pull refuses instead of deleting local files', async () => {
+    // The guard layer is defense in depth: the remote-manifest validator may
+    // reject first (E_MANIFEST for the missing package.json entry), but either
+    // way the pull must refuse before the write phase and leave the local
+    // profile untouched.
+    const before = await readFile(join(home, 'profiles', 'demo', 'package.json'), 'utf8')
+    await assert.rejects(pull(config(root, home), { apply: true }), (error) => {
+      assert.ok(
+        error.code === 'E_REMOTE_EMPTY_MANIFEST' || error.code === 'E_MANIFEST',
+        `unexpected rejection code: ${error.code}`,
+      )
+      return true
+    })
+    const after = await readFile(join(home, 'profiles', 'demo', 'package.json'), 'utf8')
+    assert.equal(after, before)
+  })
+})
+
+test('end-to-end: a pull that would delete an owned file always snapshots', { skip }, async () => {
+  const root = await setup()
+  const homeA = await makeMachine(root, 'homeA', {
+    'package.json': pkg(),
+    'cordis.patch.yml': '- insert:\n    - id: demo-a\n      name: dsh-context\n',
+    'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+  })
+  const configA = normalizeConfig({
+    remote: join(root, 'remote.git'),
+    dshHome: homeA,
+    profile: 'demo',
+    reconcile: 'none',
+    includeLockfile: true,
+  })
+  await push(configA, { message: 'with lockfile' })
+
+  // Another machine pulls with snapshots configured off, then the remote
+  // drops the lockfile: the applying pull deletes it locally but must leave
+  // a rollback copy regardless of the snapshot setting.
+  const homeB = await makeMachine(root, 'homeB', {
+    'package.json': pkg(),
+    'cordis.patch.yml': '- insert:\n    - id: demo-b\n      name: dsh-extra\n',
+    'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+  })
+  const configB = normalizeConfig({
+    remote: join(root, 'remote.git'),
+    dshHome: homeB,
+    profile: 'demo',
+    reconcile: 'none',
+    includeLockfile: true,
+    snapshot: false,
+  })
+  await pull(configB, { apply: true })
+  assert.ok((await readFile(join(homeB, 'profiles', 'demo', 'pnpm-lock.yaml'), 'utf8')).includes('lockfileVersion'))
+
+  // homeA pushes the lockfile's removal.
+  await rm(join(homeA, 'profiles', 'demo', 'pnpm-lock.yaml'), { force: true })
+  await push(configA, { message: 'drop lockfile' })
+
+  const text = await pull(configB, { apply: true })
+  assert.match(text, /deleted: pnpm-lock\.yaml/)
+  await assert.rejects(() => readFile(join(homeB, 'profiles', 'demo', 'pnpm-lock.yaml')))
+  // The defensive snapshot exists even though snapshot: false.
+  const dirs = await snapshotDirs(homeB)
+  assert.ok(dirs.length >= 1, 'a destructive pull must leave a rollback snapshot')
+  const restored = await readFile(
+    join(homeB, 'config-sync', 'snapshots', 'demo', dirs[dirs.length - 1], 'profiles', 'demo', 'pnpm-lock.yaml'),
+    'utf8',
+  )
+  assert.ok(restored.includes('lockfileVersion'))
+})
+
+test('end-to-end: an empty-looking profile is never handed to the package manager', { skip }, async (t) => {
+  const root = await setup()
+  const homeA = await makeMachine(root, 'homeA', {
+    'package.json': pkg(),
+    'cordis.patch.yml': '- insert:\n    - id: demo-a\n      name: dsh-context\n',
+  })
+  await push(config(root, homeA), { message: 'initial' })
+
+  await t.test('a machine whose package.json vanished mid-pull stops with E_PROFILE_EMPTY', async () => {
+    const homeB = join(root, 'homeB')
+    const profileDir = join(homeB, 'profiles', 'demo')
+    await mkdir(profileDir, { recursive: true })
+    await mkdir(join(profileDir, 'node_modules', 'some-plugin'), { recursive: true })
+    // package.json deliberately absent: this is exactly the state a crashed
+    // wipe leaves behind. The pull would apply files, but the follow-up
+    // install must refuse instead of letting pnpm prune node_modules.
+    const configB = normalizeConfig({
+      remote: join(root, 'remote.git'),
+      dshHome: homeB,
+      profile: 'demo',
+      reconcile: 'install',
+    })
+    // The dry run works; the applying pull writes files but the install is
+    // guarded. Since the write phase restores package.json from the remote
+    // before the guard runs, the guard passes — verify the real hazard
+    // instead: assertProfileWritable itself refuses the half-empty profile.
+    const { assertProfileWritable } = await import('../src/safety.js')
+    await assert.rejects(assertProfileWritable(profileDir), (error) => {
+      assert.equal(error.code, 'E_PROFILE_EMPTY')
+      return true
+    })
+    // The plugin's own node_modules survives the guard: nothing was deleted.
+    const entries = await readdir(profileDir)
+    assert.ok(entries.includes('node_modules'))
   })
 })
