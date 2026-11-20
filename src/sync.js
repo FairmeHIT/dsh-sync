@@ -281,6 +281,15 @@ function pluginCount(manifest) {
   return Math.max(deps, bundles)
 }
 
+/**
+ * "Nothing to commit" answers a narrower question than a reader hears: it means
+ * this machine changed nothing, not that the remote is current. Name the commit
+ * the remote already holds, so the second question is answered on the same line.
+ */
+function upToDateNote(commit) {
+  return commit ? `the remote already holds this configuration at ${shortHash(commit)}; nothing was pushed.` : ''
+}
+
 function listPaths(paths) {
   return summarizeList(paths.map((path) => path.replace(/^profiles\/[^/]+\//, '')))
 }
@@ -335,13 +344,25 @@ async function statusLocked(ctx, options) {
   const lines = ['Config sync status', header(ctx, channel)]
   if (remote === null) {
     if (remoteProfiles.length === 0) {
-      lines.push(
-        '',
-        rev
-          ? `Remote branch ${sanitizeText(ctx.config.branch, 120)} has no manifest yet.`
-          : `Remote branch ${sanitizeText(ctx.config.branch, 120)} does not exist and has no manifest yet.`,
-        'Push from the machine that already has the configuration.',
-      )
+      const topLevel = await remoteTopLevel(ctx, work, rev, options.signal)
+      if (!rev || topLevel.length === 0) {
+        lines.push(
+          '',
+          rev
+            ? `Remote branch ${sanitizeText(ctx.config.branch, 120)} exists but is empty.`
+            : `Remote branch ${sanitizeText(ctx.config.branch, 120)} does not exist yet.`,
+          'Push from the machine that already has the configuration.',
+        )
+      } else {
+        // The repository is not empty, it just is not configuration — the usual
+        // cause is the plugin's own repository used as the remote by mistake.
+        lines.push(
+          '',
+          `Remote branch ${sanitizeText(ctx.config.branch, 120)} has files but no configuration: it contains ${summarizeList(topLevel, 8)} and no profiles/<name>/manifest.json.`,
+          'Point remote at the repository that holds the configuration (the one with a profiles/ directory),',
+          'or push from the machine that already has the configuration.',
+        )
+      }
     } else {
       lines.push(
         '',
@@ -439,6 +460,7 @@ async function pushLocked(ctx, options) {
       header(ctx, channel),
       '',
       'Already up to date; nothing to commit.',
+      upToDateNote(remote.commit),
       warning ? `warning: ${warning}` : '',
     ]
       .filter(Boolean)
@@ -502,6 +524,7 @@ async function pushLocked(ctx, options) {
       header(ctx, channel),
       '',
       'Already up to date; nothing to commit.',
+      upToDateNote(remote.commit),
       preserved.size > 0
         ? `preserved: ${listPaths([...preserved.keys()])} (not managed by this machine)`
         : '',
@@ -557,13 +580,14 @@ async function pushLocked(ctx, options) {
       header(ctx, channel),
       '',
       'Already up to date; nothing to commit.',
+      upToDateNote(remote?.commit ?? result.commit),
       warning ? `warning: ${warning}` : '',
     ]
       .filter(Boolean)
       .join('\n')
   }
 
-  await pushBranch(ctx.config, work, { signal: options.signal })
+  const published = await pushBranch(ctx.config, work, { signal: options.signal })
   const warning = await recordState(ctx.config, ctx.profile, {
     commit: result.commit,
     files: shaMap(local.manifest.files),
@@ -581,6 +605,19 @@ async function pushLocked(ctx, options) {
   if (remote !== null && options.force === true) lines.push('mode:    forced overwrite of remote changes')
   if (preserved.size > 0) {
     lines.push(`preserved: ${listPaths([...preserved.keys()])} (not managed by this machine)`)
+  }
+  if (published.verified) {
+    lines.push(`verified: the remote branch is at this commit (read back after the push)`)
+  } else if (published.remoteCommit) {
+    lines.push(
+      '',
+      `warning: the remote reports ${shortHash(published.remoteCommit)} instead of ${shortHash(result.commit)}; another push may have landed beside this one.`,
+    )
+  } else {
+    lines.push(
+      '',
+      `warning: the push was accepted but the remote could not be read back (${published.reason}); another machine may not see this commit yet.`,
+    )
   }
   if (findings.length > 0) lines.push('', summarizeSecrets(findings))
   if (warning) lines.push('', `warning: ${warning}`)
@@ -752,23 +789,58 @@ export async function testConnection(rawConfig, options = {}) {
   })
 }
 
-function remoteEmptyError(ctx, channel, rev, profiles) {
+/** Top-level names of a committed tree, for diagnosing a wrong repository. */
+async function remoteTopLevel(ctx, work, rev, signal) {
+  if (!rev) return []
+  const entries = await treeEntries(ctx.config, work, rev, '', signal)
+  const names = new Set()
+  for (const entry of entries) {
+    const name = entry.path.split('/')[0]
+    if (name) names.add(name)
+  }
+  return [...names].sort()
+}
+
+/**
+ * "No manifest" has three very different causes, and the actionable fix differs
+ * for each: an empty repository, a branch with no files, and — the trap — a
+ * repository with content that simply is not configuration (most often the
+ * plugin's own source repository, pasted where the configuration repository
+ * belongs). Name the cause from the tree itself instead of asking the reader to
+ * guess which one they hit.
+ */
+function remoteEmptyError(ctx, channel, rev, profiles, topLevel = []) {
   const branch = sanitizeText(ctx.config.branch, 120)
-  if (!rev || profiles.length === 0) {
+  const remote = sanitizeText(displayRemote(ctx.config.remote), 160)
+  if (!rev || topLevel.length === 0) {
     return new SyncError(
       'E_REMOTE_EMPTY',
-      `remote branch "${branch}" has no manifest yet; push from the machine that already has the configuration first`,
+      rev
+        ? `the remote at ${remote} has an empty branch "${branch}", so it has no configuration to pull; push from a machine that already has the configuration`
+        : `the remote at ${remote} has no branch "${branch}" yet, so it has no configuration to pull; push from a machine that already has the configuration`,
+      { reason: rev ? 'branch-empty' : 'branch-missing', branch, remote },
+    )
+  }
+  if (profiles.length === 0) {
+    return new SyncError(
+      'E_REMOTE_EMPTY',
+      `the remote at ${remote} has files on branch "${branch}" but no configuration: it contains ${summarizeList(topLevel, 8)} and no profiles/<name>/manifest.json. `
+        + 'Point "remote" at the repository that holds the configuration (the one with a profiles/ directory), '
+        + 'or push from the machine that already has the configuration.',
+      { reason: 'no-profiles', branch, remote, topLevel: topLevel.slice(0, 12) },
     )
   }
   if (profiles.length === 1) {
     return new SyncError(
       'E_REMOTE_PROFILE',
-      `remote branch "${branch}" has configuration for profile "${sanitizeText(profiles[0], 80)}", but this machine syncs "${sanitizeText(channel, 80)}". Run /sync-status, then align the profile names or push from this machine to publish its own directory.`,
+      `the remote at ${remote} has configuration for profile "${sanitizeText(profiles[0], 80)}" on branch "${branch}", but this machine syncs "${sanitizeText(channel, 80)}". Run /sync-status, then align the profile names or push from this machine to publish its own directory.`,
+      { reason: 'other-profile', branch, remote, profiles },
     )
   }
   return new SyncError(
     'E_REMOTE_PROFILE',
-    `remote branch "${branch}" has configuration for profiles ${summarizeList(profiles)}; this machine syncs "${sanitizeText(channel, 80)}". Set "profile" to one of them, or push from this machine to publish its own directory.`,
+    `the remote at ${remote} has configuration for profiles ${summarizeList(profiles)} on branch "${branch}"; this machine syncs "${sanitizeText(channel, 80)}". Set "profile" to one of them, or push from this machine to publish its own directory.`,
+    { reason: 'other-profile', branch, remote, profiles },
   )
 }
 
@@ -804,7 +876,10 @@ async function pullLocked(ctx, options) {
       adopted = true
       remote = await remoteState(ctx, work, { channel })
     }
-    if (remote === null) throw remoteEmptyError(ctx, channel, rev, profiles)
+    if (remote === null) {
+      const topLevel = await remoteTopLevel(ctx, work, rev, options.signal)
+      throw remoteEmptyError(ctx, channel, rev, profiles, topLevel)
+    }
   }
   const local = await localState(ctx, { channel })
 

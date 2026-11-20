@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.10] - 2026-11-20
+
+### Changed
+
+- **A remote that has no configuration says which of the three situations it is.** One message,
+  `remote branch "main" has no manifest yet; push from the machine that already has the
+  configuration first`, covered a branch that does not exist, a branch that exists but is empty,
+  and — the trap — a repository full of files that is simply not configuration (the plugin's own
+  source repository pasted where the configuration repository belongs). Status and pull now name
+  the cause, list the top-level entries they found, and print the remote they read, so a wrong
+  `remote` is visible instead of plausible. `E_REMOTE_EMPTY` carries `reason`
+  (`branch-missing` / `branch-empty` / `no-profiles`) and `E_REMOTE_PROFILE` carries the profile
+  directories the remote does have.
+- **A push reports what the remote serves, not only what Git accepted.** After `push` the plugin
+  reads the branch back with `git ls-remote` and says either `verified: the remote branch is at
+  this commit` or a warning naming the commit the remote reports (or why it could not be read).
+  A push that Git accepted but the remote never published can no longer pass as a success.
+- **"Already up to date" names the commit the remote already holds**, so the line answers "is the
+  remote current?" and not only "did this machine change anything?".
+
 ## [0.7.9] - 2026-11-20
 
 ### Added

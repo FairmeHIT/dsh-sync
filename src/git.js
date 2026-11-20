@@ -470,7 +470,47 @@ export async function removeManagedFile(config, cwd, { profile, path, message, s
   return currentCommit(config, cwd, signal)
 }
 
-export async function pushBranch(config, cwd, options = {}) {  const branch = requireBranch(config)
+/**
+ * Read a branch back from the remote after a push.
+ *
+ * `git push` reports what the local git sent, not what the remote kept: a proxy,
+ * a mirror or a branch rewritten by someone else can accept the ref and publish
+ * something else. The read-back turns "the push appeared to succeed" into a fact
+ * about the remote. It never throws — an unreadable remote is an answer, not a
+ * reason to claim the push failed — and returns the commit the remote reports so
+ * the caller can show it.
+ */
+async function readBackBranch(config, cwd, branch, options) {
+  const result = await run(config, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], {
+    cwd,
+    allowFail: true,
+    timeout: 60_000,
+    signal: options.signal,
+  })
+  if (result.code !== 0) {
+    return { verified: false, reason: redactRemote(result.stderr || result.stdout, config.remote) }
+  }
+  const line = String(result.stdout ?? '')
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find(Boolean)
+  const remoteCommit = line ? line.split(/\s+/)[0] : ''
+  if (!remoteCommit) {
+    return { verified: false, reason: `branch "${branch}" is not on the remote after the push` }
+  }
+  const head = await run(config, ['rev-parse', 'HEAD'], { cwd, allowFail: true, signal: options.signal })
+  const localCommit = String(head.stdout ?? '').trim()
+  return { verified: remoteCommit === localCommit, remoteCommit, localCommit }
+}
+
+/**
+ * Push HEAD to the configured branch and read it back. Resolves with
+ * `{ verified, remoteCommit?, localCommit?, reason? }` — the push itself is the
+ * authority on whether Git accepted the ref; the read-back says whether the
+ * remote now serves it.
+ */
+export async function pushBranch(config, cwd, options = {}) {
+  const branch = requireBranch(config)
   const result = await run(config, ['push', 'origin', `HEAD:refs/heads/${branch}`], {
     cwd,
     allowFail: true,
@@ -499,4 +539,5 @@ export async function pushBranch(config, cwd, options = {}) {  const branch = re
     allowFail: true,
     signal: options.signal,
   })
+  return await readBackBranch(config, cwd, branch, options)
 }

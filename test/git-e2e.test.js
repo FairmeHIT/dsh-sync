@@ -72,12 +72,36 @@ test('end-to-end: push, status, conflict-safe push, pull, force', { skip }, asyn
 
   await t.test('status reports an empty repository', async () => {
     const text = await status(configA)
-    assert.match(text, /no manifest yet/i)
+    assert.match(text, /does not exist yet/)
+    assert.match(text, /push from the machine that already has the configuration/i)
+  })
+
+  await t.test('status names a repository that has files but no configuration', async () => {
+    const root = await setup()
+    // The classic wrong remote: the plugin's own source repository pasted where
+    // the configuration repository belongs. Its main has files, no profiles/.
+    await commitToRemote(root, { 'README.md': '# plugin\n', 'src/index.js': 'export {}\n' })
+    const home = await makeMachine(root, 'home', { 'package.json': pkg() })
+    const cfg = config(root, home)
+
+    const text = await status(cfg)
+    assert.match(text, /has files but no configuration/)
+    assert.match(text, /README\.md/)
+
+    await assert.rejects(pull(cfg), (error) => {
+      assert.equal(error.code, 'E_REMOTE_EMPTY')
+      assert.equal(error.details?.reason, 'no-profiles')
+      assert.match(error.message, /has files on branch "main" but no configuration/)
+      assert.match(error.message, /README\.md/)
+      assert.match(error.message, /remote\.git/, 'the message must name the remote it read')
+      return true
+    })
   })
 
   await t.test('push publishes only allowlisted profile files', async () => {
     const text = await push(configA, { message: 'initial from A' })
     assert.match(text, /Pushed\./)
+    assert.match(text, /verified: the remote branch is at this commit/)
     assert.match(text, /files:\s+2/)
     assert.deepEqual((await remoteTree(root)).sort(), [
       'profiles/demo/cordis.patch.yml',
@@ -97,6 +121,7 @@ test('end-to-end: push, status, conflict-safe push, pull, force', { skip }, asyn
     const before = await remoteHead(root)
     const text = await push(configA)
     assert.match(text, /Already up to date/)
+    assert.match(text, /the remote already holds this configuration at [0-9a-f]{12}/)
     assert.equal(await remoteHead(root), before)
   })
 
