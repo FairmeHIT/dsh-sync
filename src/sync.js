@@ -446,10 +446,24 @@ async function pushLocked(ctx, options) {
   }
 
   if (remote !== null && options.force !== true) {
+    // A refused push must still tell the caller what a forced push would do:
+    // the card shows the same diff it would show for a pull, so the overwrite
+    // is confirmed against content the user has actually seen.
+    const details = {
+      forceable: true,
+      channel,
+      remoteCommit: remote.commit,
+      remoteProfile: remote.manifest.profile,
+      preview: [
+        'This push would write these changes into the remote branch:',
+        summarizeDiff(diffManifests(remote.syncedManifest, local.manifest)),
+      ].join('\n'),
+    }
     if (!state) {
       throw new SyncError(
         'E_CONFLICT',
         `remote already contains a manifest for profile "${channel}" and this machine has never synced; run /sync-pull first to adopt it, or push with force=true to overwrite it`,
+        { ...details, reason: 'never-synced' },
       )
     }
     const remoteChanged = changedFiles(state.files, shaMap(remote.syncedManifest.files), compareSet)
@@ -457,6 +471,7 @@ async function pushLocked(ctx, options) {
       throw new SyncError(
         'E_CONFLICT',
         `remote changed since this machine's last sync (${listPaths(remoteChanged)}); run /sync-pull first, or push with force=true to overwrite it`,
+        { ...details, reason: 'remote-moved', files: remoteChanged },
       )
     }
   }

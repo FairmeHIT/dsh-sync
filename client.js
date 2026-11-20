@@ -95,6 +95,9 @@ window.__ModuleLoader__.load({
           pushConfirmTitle: '确认推送？',
           pullConfirmHint: '以下改动将写入本机；写入前会自动快照，可随时恢复。',
           pushConfirmHint: '本机 Profile 将写入远端分支；其他机器下次拉取时会收到这些文件。',
+          overwriteTitle: '远端与上次同步不一致',
+          overwriteHint: '远端这些文件会被本机内容覆盖，另一台机器的改动将从分支头部消失（Git 历史仍可找回）。取消不改动任何内容；只想接收远端改动请改用“拉取”。',
+          overwriteButton: '仍要覆盖远端',
           adoptNote: '会把远端目录 {channel} 映射为本机 Profile {profile}。',
         }
       : {
@@ -168,6 +171,9 @@ window.__ModuleLoader__.load({
           pushConfirmTitle: 'Push to remote?',
           pullConfirmHint: 'These changes will be written to this machine. A snapshot is taken first and can be restored.',
           pushConfirmHint: "This machine's profile will be written to the remote branch; other machines receive it on their next pull.",
+          overwriteTitle: 'The remote moved since the last sync',
+          overwriteHint: 'The remote files below would be replaced by this machine, and the other change disappears from the branch tip (Git history still has it). Cancel changes nothing; to take the remote side instead, use Pull.',
+          overwriteButton: 'Overwrite the remote',
           adoptNote: "Maps remote directory {channel} to this machine's profile {profile}.",
         }
 
@@ -195,6 +201,8 @@ window.__ModuleLoader__.load({
 .dcfg-btn:disabled { opacity:.55; cursor:default; }
 .dcfg-btn-primary { background:var(--dsw-alias-brand-primary, #3b82f6); border-color:transparent; color:#fff; }
 .dcfg-btn-primary:hover:not(:disabled) { opacity:.92; }
+.dcfg-btn-danger { background:var(--dsw-alias-state-error-primary, #d64545); border-color:transparent; color:#fff; }
+.dcfg-btn-danger:hover:not(:disabled) { opacity:.92; }
 .dcfg-syncgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); align-items:start; gap:12px; }
 .dcfg-section { display:flex; flex-direction:column; gap:8px; border:1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.22)); border-radius:10px; background:var(--dsw-alias-bg-layer-2, rgba(127,127,127,.03)); padding:12px; }
 .dcfg-sectiontitle { font-size:13px; font-weight:600; }
@@ -291,6 +299,9 @@ window.__ModuleLoader__.load({
       if (!response.ok || data.ok === false) {
         var failure = new Error(data.message || 'The config-sync request failed.')
         failure.code = data.code || 'E_HTTP'
+        // Structured, server-filtered facts (a refused overwrite carries the
+        // diff the user must see before confirming it).
+        failure.details = data.details || null
         throw failure
       }
       return data
@@ -834,6 +845,33 @@ window.__ModuleLoader__.load({
               channel: '',
               profile: String((current.data && current.data.profile) || ''),
               adopted: false,
+              overwrite: false,
+            },
+          }
+        })
+      }
+
+      /**
+       * The server refused a push because the remote is not the one this
+       * machine last synced. Ask again with the diff in front of the reader
+       * instead of leaving the conflict unactionable in the card.
+       */
+      function openOverwrite(details) {
+        setView(function (current) {
+          return {
+            ...current,
+            busy: false,
+            busyAction: '',
+            error: null,
+            notice: '',
+            dialog: {
+              kind: 'push',
+              text: String(details.preview || ''),
+              channel: String(details.channel || ''),
+              profile: String((current.data && current.data.profile) || ''),
+              adopted: false,
+              overwrite: true,
+              reason: String(details.reason || ''),
             },
           }
         })
@@ -860,7 +898,7 @@ window.__ModuleLoader__.load({
             body: JSON.stringify(
               pull
                 ? { apply: true, expectedCommit: dialog.commit || '', force: dialog.destructive === true }
-                : { message: view.message },
+                : { message: view.message, force: dialog.overwrite === true },
             ),
             timeoutMs: 600000,
           })
@@ -876,11 +914,19 @@ window.__ModuleLoader__.load({
           })
           await load(true, false)
         } catch (error) {
+          // A conflict is not the end of the operation: it is the point where
+          // the reader has to decide. Only a first press escalates — a refused
+          // forced push is reported as a plain failure instead of looping.
+          if (!pull && error && error.code === 'E_CONFLICT' && error.details && error.details.forceable === true && dialog.overwrite !== true) {
+            confirming = false
+            openOverwrite(error.details)
+            return
+          }
           setView(function (current) {
             if (error && error.code === 'E_BUSY') {
               return { ...current, busy: false, busyAction: '', notice: copy.busyElsewhere, error: null }
             }
-            return { ...current, busy: false, busyAction: '', error: error, notice: '' }
+            return { ...current, busy: false, busyAction: '', error: error, notice: '', dialog: null }
           })
         } finally {
           confirming = false
@@ -923,7 +969,14 @@ window.__ModuleLoader__.load({
 
       function dialogView(box) {
         var pull = box.kind === 'pull'
-        var title = pull ? copy.pullConfirmTitle : copy.pushConfirmTitle
+        var overwrite = pull === false && box.overwrite === true
+        var title = pull ? copy.pullConfirmTitle : overwrite ? copy.overwriteTitle : copy.pushConfirmTitle
+        var hint = pull ? copy.pullConfirmHint : overwrite ? copy.overwriteHint : copy.pushConfirmHint
+        var confirmLabel = view.busy
+          ? (pull ? copy.pullBusy : copy.pushBusy)
+          : overwrite
+            ? copy.overwriteButton
+            : copy.confirm
         return h(
           'div',
           {
@@ -939,8 +992,8 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dcfg-modal-card' },
             h('h3', { className: 'dcfg-modal-title' }, title),
-            h('p', { className: 'dcfg-hint' }, pull ? copy.pullConfirmHint : copy.pushConfirmHint),
-            pull ? h('pre', { className: 'dcfg-preview-text' }, box.text) : null,
+            h('p', { className: 'dcfg-hint' }, hint),
+            pull || overwrite ? h('pre', { className: 'dcfg-preview-text' }, box.text) : null,
             pull && box.channel && box.channel !== box.profile
               ? h('p', { className: 'dcfg-adopt' }, copy.adoptNote.replace('{channel}', box.channel).replace('{profile}', box.profile))
               : null,
@@ -972,8 +1025,13 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', className: 'dcfg-btn', disabled: view.busy, onClick: closeDialog }, copy.cancel),
               h(
                 'button',
-                { type: 'button', className: 'dcfg-btn dcfg-btn-primary', disabled: view.busy, onClick: confirmDialog },
-                view.busy ? (pull ? copy.pullBusy : copy.pushBusy) : copy.confirm,
+                {
+                  type: 'button',
+                  className: 'dcfg-btn' + (overwrite ? ' dcfg-btn-danger' : ' dcfg-btn-primary'),
+                  disabled: view.busy,
+                  onClick: confirmDialog,
+                },
+                confirmLabel,
               ),
             ),
           ),

@@ -193,7 +193,10 @@ dsh plugin --profile desktop add dsh-config-git-sync
 **保存位置**：UI 通过 DSH 配置编辑器保存到当前运行 profile 的配置覆盖层，保留其他配置字段。这个文件也属于同步范围，但本机 `- id: config-sync` 那一行被当作机器本地数据：Push 时剔除、Pull 应用后并回，所以保存的仓库地址不会因为 Pull 被清空。Pull 输出里会表示 `preserved: config-sync row (this machine)`，卡片也会在应用后提示。若已有 home/命令行配置覆盖当前字段，编辑器会拒绝保存，界面会报告失败，不会修改高优先级配置。
 
 - 点击 **拉取** 先做一次只读预览，随后弹出确认框：列出将被覆盖的文件、快照说明，以及远端目录到本机 profile 的映射（如果有）。只有点 **确认** 才写盘；取消不会发出写入请求。
-- 点击 **推送** 立即弹出确认框（可填写提交信息），确认后才推送；取消不会发出写入请求。UI 不提供强制覆盖，需要 `--force` 时请用 `/sync-push --force`。
+- 点击 **推送** 立即弹出确认框（可填写提交信息），确认后才推送；取消不会发出写入请求。
+- 推送被拒绝且原因是远端已变（`E_CONFLICT`）时，卡片不会只报错：它把冲突变成第二次确认框，
+  列出这次 push 会写进远端的改动，按钮变成红色的 **仍要覆盖远端**；确认后才会带 `force: true`
+  重发。拒绝一次即止——强制后仍失败就按普通错误报出，不会循环。想接收远端改动时改用 **拉取**。
 - **刷新** 与 **测试连接** 在 **更多** 里：刷新只读；测试连接会向远端写入并随后删除一个 `.config-sync-probe` 标记文件，验证仓库可读可写，不触碰任何同步内容，通过后输出 `Connection test passed`。
 - **应用 Pull** 先写快照，再覆盖本地受管文件；本机 `config-sync` 行会被保留。
 - **Pull 不会删掉 `package.json` / `cordis.patch.yml`**：远端清单没带这两个文件时，本机副本保留，
@@ -300,7 +303,9 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 - 远端还没有本 profile 的 manifest：直接发布。
 - 远端内容与本机完全一致：不产生空提交，只更新本地 `state.json`。
 - 远端在本机上次同步后发生了变化：拒绝 push（`E_CONFLICT`），先 `/sync-pull`；确实要覆盖时用
-  `/sync-push --force`（或工具参数 `force: true`）。
+  `/sync-push --force`（或工具参数 `force: true`）。卡片里同样的选择被做成第二次确认：红色
+  **仍要覆盖远端** 按钮。拒绝时错误里带有 `details.preview`（会被写进远端的改动）、
+  `details.reason`（`never-synced` / `remote-moved`）和 `details.files`，所以确认前能看到后果。
 - 新机器第一次 push 到非空远端：同样拒绝，先 pull 采纳远端，或显式 force。
 
 **pull 的规则**：
@@ -385,7 +390,7 @@ Git 认证（SSH key 或 HTTPS 凭据）需要提前配好，提示词里的 `YO
 | `E_CONFIG` | 没有配置 `remote`，或 `branch` 不合法；见上面的配置示例 |
 | `E_PROFILE` | 自动探测到多个 profile、或探测到的目录名不是安全路径段；显式设置 `profile` |
 | `E_PROFILE_MISMATCH` | 远端 manifest 的 profile 与本机配置不一致；检查 `profile` 或仓库路径 |
-| `E_CONFLICT` | 远端在上次同步后变化；先 `/sync-pull`，确认后再 `/sync-push --force` |
+| `E_CONFLICT` | 远端在上次同步后变化（或本机从未同步过）：先 `/sync-pull`；确认要覆盖时点卡片里的 **仍要覆盖远端**，或 `/sync-push --force` |
 | `E_AUTH` | push 无法认证或找不到仓库；检查 remote URL、SSH key 或 HTTPS 凭据 |
 | `E_BUSY` | 另一个同步操作持有 `sync.lock`；等它结束，或确认进程已退出后删除锁文件 |
 | `E_PUSH_REJECTED` | 远端在 fetch 和 push 之间又前进了；重新 `/sync-status`，pull 后再 push |

@@ -214,7 +214,7 @@ The card shows one meta line (remote · branch · profile), **Pull** and **Push*
 **Storage:** the UI uses DSH's configuration editor to save in the running profile's configuration overlay, preserving unrelated fields. That file is also managed by sync, but this machine's `- id: config-sync` row is treated as machine-local data: it is stripped on push and merged back after a Pull applies, so the saved repository URL is not cleared by Pull. The pull output reports `preserved: config-sync row (this machine)` and the card says so after applying. If a home or command-line overlay overrides the edited fields, the editor rejects the save; it does not rewrite higher-priority configuration.
 
 - **Pull** first runs a read-only preview, then opens a confirmation dialog listing the files it will overwrite, the snapshot note, and (when applicable) the remote-directory to local-profile mapping. Nothing is written until **Confirm**; **Cancel** sends no write request.
-- **Push** opens its confirmation dialog immediately (with an optional commit message) and pushes only after **Confirm**; cancel sends no request. The UI does not expose force; use `/sync-push --force` when needed.
+- **Push** opens its confirmation dialog immediately (with an optional commit message) and pushes only after **Confirm**; cancel sends no request. When a push is refused because the remote moved (`E_CONFLICT`), the card turns that refusal into a second confirmation: it lists the changes this push would write into the remote branch and the confirm button becomes the red **Overwrite the remote**. Only that press resends with `force: true`, and it happens once — a forced push that still fails is reported as an ordinary error instead of looping. To take the remote side instead, use **Pull**.
 - **Refresh** and **Test connection** live under **More**: refresh is read-only; test connection writes and then removes a `.config-sync-probe` marker file on the remote, never touching synced content, and prints `Connection test passed`.
 - **Apply pull** writes a snapshot first, then overwrites managed local files. This machine's `config-sync` row is preserved.
 - **A pull never removes `package.json` or `cordis.patch.yml`**: when the remote manifest does not carry them, the local copy stays and the output says `kept locally: …`. Any other managed file the remote no longer carries is moved to
@@ -324,7 +324,11 @@ steps 1–2 in the second prompt.
 - No manifest on the remote: publish normally.
 - Local and remote content already match: no empty commit; only local state is updated.
 - The remote moved since this machine's last sync: refuse (`E_CONFLICT`) and ask for a pull; to
-  overwrite deliberately, use `/sync-push --force` (or `force: true`).
+  overwrite deliberately, use `/sync-push --force` (or `force: true`). The card makes the same
+  choice a second confirmation behind the red **Overwrite the remote** button. The refusal carries
+  `details.preview` (the changes a forced push would write), `details.reason`
+  (`never-synced` / `remote-moved`) and `details.files`, so the consequence is visible before
+  confirming.
 - A fresh machine pushing to a non-empty remote: refused as well; pull to adopt the remote, or
   force explicitly.
 
@@ -437,7 +441,7 @@ decides the result. Git history keeps every step, but the conflict itself needs 
 | `E_CONFIG` | `remote` is missing, or `branch` is invalid; see the config example |
 | `E_PROFILE` | Several profiles matched, or the detected directory name is not a safe path segment; set `profile` explicitly |
 | `E_PROFILE_MISMATCH` | The remote manifest names a different profile; check `profile` or the repository path |
-| `E_CONFLICT` | The remote moved since the last sync; run `/sync-pull`, then `/sync-push --force` if you really mean to overwrite |
+| `E_CONFLICT` | The remote moved since the last sync (or this machine never synced): run `/sync-pull`; to overwrite deliberately press **Overwrite the remote** in the card, or run `/sync-push --force` |
 | `E_AUTH` | Push could not authenticate or find the repository; check the remote URL, SSH key or HTTPS credentials |
 | `E_BUSY` | Another sync holds `sync.lock`; wait for it, or remove the lock file if the process is gone |
 | `E_PUSH_REJECTED` | The remote moved between fetch and push; run `/sync-status` again, pull, then push |

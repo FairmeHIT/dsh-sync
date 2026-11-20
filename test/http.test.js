@@ -133,6 +133,50 @@ describe('config-sync HTTP routes', () => {
     assert.deepEqual(seen, { message: 'from the card', force: true })
   })
 
+  test('a refused push forwards only the plain facts the card may show', async () => {
+    const routes = createHttpRoutes(config, {
+      status: async () => '',
+      push: async () => {
+        throw new SyncError('E_CONFLICT', 'remote already contains a manifest for profile "desktop"', {
+          forceable: true,
+          reason: 'never-synced',
+          channel: 'desktop',
+          remoteCommit: 'abc123',
+          remoteProfile: 'desktop',
+          preview: 'This push would write these changes into the remote branch:\n~ package.json',
+          leaked: { token: 'top-secret' },
+          nested: ['https://user:secret@example.com/x.git'],
+        })
+      },
+      pull: async () => '',
+    })
+    const { body } = await call(routes, HTTP_ROUTES.push, { method: 'POST', body: {} })
+    assert.equal(body.ok, false)
+    assert.equal(body.code, 'E_CONFLICT')
+    assert.deepEqual(body.details, {
+      forceable: true,
+      reason: 'never-synced',
+      channel: 'desktop',
+      remoteCommit: 'abc123',
+      remoteProfile: 'desktop',
+      preview: 'This push would write these changes into the remote branch:\n~ package.json',
+    })
+    assert.doesNotMatch(JSON.stringify(body), /top-secret|secret@example/)
+  })
+
+  test('an error without details carries no details field', async () => {
+    const routes = createHttpRoutes(config, {
+      status: async () => '',
+      push: async () => {
+        throw new SyncError('E_GIT', 'git failed')
+      },
+      pull: async () => '',
+    })
+    const { body } = await call(routes, HTTP_ROUTES.push, { method: 'POST', body: {} })
+    assert.equal(body.code, 'E_GIT')
+    assert.equal('details' in body, false)
+  })
+
   test('pull defaults to a dry run and accepts apply', async () => {
     const seen = []
     const routes = createHttpRoutes(config, {

@@ -50,15 +50,44 @@ function failure(config, error, status = 200) {
   if (error?.code === 'E_BUSY') {
     return json({ ok: false, ...identity(config), code: 'E_BUSY', message: error.message, busy: true }, 409)
   }
+  // A refused overwrite carries the facts the card needs to ask a second,
+  // informed question (which files would move, which commit is on the remote).
+  // Only the plugin's own plain-data details travel; error internals do not.
+  const details = plainDetails(error?.details)
   return json(
     {
       ok: false,
       ...identity(config),
       code: error?.code ?? 'E_SYNC',
       message: error?.message ?? String(error),
+      ...(details ? { details } : {}),
     },
     status,
   )
+}
+
+const DETAIL_KEYS = ['forceable', 'reason', 'channel', 'remoteCommit', 'remoteProfile', 'preview', 'files']
+
+/** Copy only serialisable, string-or-array diagnostics out of an error. */
+function plainDetails(details) {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
+  const out = {}
+  let found = false
+  for (const key of DETAIL_KEYS) {
+    if (!(key in details)) continue
+    const value = details[key]
+    if (typeof value === 'string') {
+      out[key] = value.slice(0, 4000)
+      found = true
+    } else if (typeof value === 'boolean') {
+      out[key] = value
+      found = true
+    } else if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+      out[key] = value.slice(0, 50).map((item) => item.slice(0, 200))
+      found = true
+    }
+  }
+  return found ? out : null
 }
 
 async function readBody(request) {

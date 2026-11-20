@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.9] - 2026-11-20
+
+### Added
+
+- **A refused push is now a question the card can ask, not a dead end.** When `push` refuses
+  because the remote is not the one this machine last synced (`E_CONFLICT`, either a first push to
+  a non-empty remote or a remote that moved), the error carries plain `details` — `forceable`,
+  `reason` (`never-synced` / `remote-moved`), `channel`, `remoteCommit`, `remoteProfile`, the
+  changed `files`, and a `preview` of what a forced push would write. The card turns that into a
+  second confirmation dialog: the diff is shown and the confirm button becomes the red
+  **Overwrite the remote** / **仍要覆盖远端**, which resends with `force: true`. The escalation
+  happens once; a forced push that still fails is reported as an ordinary error. The HTTP failure
+  shape forwards only those allow-listed, truncated fields, so credentials and error internals never
+  reach the browser.
+
+### Changed
+
+- The push confirmation now always sends an explicit `force` flag (`false` unless the reader
+  escalated), so the request records which decision the reader actually made.
+
 ## [0.7.8] - 2026-11-20
 
 ### Fixed

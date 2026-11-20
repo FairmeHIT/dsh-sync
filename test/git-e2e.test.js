@@ -115,7 +115,20 @@ test('end-to-end: push, status, conflict-safe push, pull, force', { skip }, asyn
   const configB = config(root, homeB)
 
   await t.test('a fresh machine cannot overwrite a non-empty remote', async () => {
-    await assert.rejects(push(configB), { code: 'E_CONFLICT' })
+    const refused = await push(configB).then(
+      () => null,
+      (error) => error,
+    )
+    assert.ok(refused, 'the push must be refused')
+    assert.equal(refused.code, 'E_CONFLICT')
+    // The refusal has to be actionable in the card: it says an overwrite is
+    // possible and shows the diff that an overwrite would write.
+    assert.equal(refused.details.forceable, true)
+    assert.equal(refused.details.reason, 'never-synced')
+    assert.equal(refused.details.channel, 'demo')
+    assert.equal(refused.details.remoteProfile, 'demo')
+    assert.match(refused.details.preview, /would write these changes into the remote branch/)
+    assert.match(refused.details.preview, /package\.json/)
     assert.match(await pull(configB), /dry run/)
   })
 
@@ -173,7 +186,19 @@ test('end-to-end: push, status, conflict-safe push, pull, force', { skip }, asyn
   })
 
   await t.test('push refuses to overwrite the remote change without force', async () => {
-    await assert.rejects(push(configA), { code: 'E_CONFLICT' })
+    const refused = await push(configA).then(
+      () => null,
+      (error) => error,
+    )
+    assert.ok(refused, 'the push must be refused')
+    assert.equal(refused.code, 'E_CONFLICT')
+    assert.equal(refused.details.forceable, true)
+    assert.equal(refused.details.reason, 'remote-moved')
+    assert.deepEqual(refused.details.files, [
+      'profiles/demo/cordis.patch.yml',
+      'profiles/demo/package.json',
+    ])
+    assert.match(refused.details.preview, /would write these changes into the remote branch/)
   })
 
   await t.test('pull apply adopts the remote change', async () => {

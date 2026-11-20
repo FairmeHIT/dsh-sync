@@ -146,8 +146,65 @@ test('push opens its confirmation immediately and writes only on confirm', async
   ui.queue.push(response({ ok: true, text: 'Pushed. Other machines can now run /sync-pull.' }), response(status))
   ui.button('Confirm').props.onClick(); await tick()
   assert.equal(ui.calls.length, 3)
-  assert.deepEqual(ui.body(ui.calls[1]), { message: 'my commit' })
+  assert.deepEqual(ui.body(ui.calls[1]), { message: 'my commit', force: false })
   assert.match(ui.notice(), /push complete/i)
+})
+
+test('a refused push asks again with the diff and only then overwrites', async () => {
+  const ui = setup(); await tick()
+  ui.button('Push').props.onClick(); await tick()
+  assert.equal(ui.calls.length, 1)
+  ui.queue.push(
+    response({
+      ok: false,
+      code: 'E_CONFLICT',
+      message: 'remote already contains a manifest for profile "work" and this machine has never synced',
+      details: {
+        forceable: true,
+        reason: 'never-synced',
+        channel: 'work',
+        remoteCommit: 'abc123',
+        preview: 'This push would write these changes into the remote branch:\n~ package.json',
+      },
+    }),
+    response({ ok: true, text: 'Pushed. Other machines can now run /sync-pull.' }),
+    response(status),
+  )
+  ui.button('Confirm').props.onClick(); await tick()
+  assert.deepEqual(ui.body(ui.calls[1]), { message: '', force: false })
+  const box = ui.dialog()
+  assert.ok(box, 'the conflict keeps a dialog open')
+  assert.match(ui.text(box), /remote moved|moved since/i)
+  assert.match(ui.text(box), /package\.json/)
+  assert.match(ui.text(box), /overwrite the remote/i)
+  assert.ok(ui.find((n) => n.props.role === 'alert') === undefined, 'the conflict is not an error banner')
+  ui.button('Overwrite the remote').props.onClick(); await tick()
+  assert.equal(ui.calls.length, 4)
+  assert.deepEqual(ui.body(ui.calls[2]), { message: '', force: true })
+  assert.match(ui.notice(), /push complete/i)
+})
+
+test('a forced push that still conflicts reports the failure instead of looping', async () => {
+  const ui = setup(); await tick()
+  ui.button('Push').props.onClick(); await tick()
+  ui.queue.push(
+    response({ ok: false, code: 'E_CONFLICT', message: 'first refusal', details: { forceable: true, preview: '~ package.json' } }),
+    response({ ok: false, code: 'E_CONFLICT', message: 'second refusal', details: { forceable: true, preview: '~ package.json' } }),
+  )
+  ui.button('Confirm').props.onClick(); await tick()
+  ui.button('Overwrite the remote').props.onClick(); await tick()
+  assert.equal(ui.calls.length, 3, 'the forced push is not retried')
+  assert.equal(ui.dialog(), undefined)
+  assert.match(ui.text(ui.find((n) => n.props.role === 'alert')), /second refusal/)
+})
+
+test('a conflict without forceable details stays a plain error', async () => {
+  const ui = setup(); await tick()
+  ui.button('Push').props.onClick(); await tick()
+  ui.queue.push(response({ ok: false, code: 'E_CONFLICT', message: 'no details here' }))
+  ui.button('Confirm').props.onClick(); await tick()
+  assert.equal(ui.dialog(), undefined)
+  assert.match(ui.text(ui.find((n) => n.props.role === 'alert')), /no details here/)
 })
 
 test('a pull preview timeout stays retryable and nothing is written', async () => {
